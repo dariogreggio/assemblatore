@@ -19,13 +19,13 @@
 #elif ST62
 #define __VER__ ((1 << 8) + 0)
 #elif _6502
-#define __VER__ ((1 << 8) + 0)
+#define __VER__ ((1 << 8) + 1)
 #endif
 
 #define MAX_NAME_LEN 63
 
 struct ERRORE {
-  int t;
+  int16_t t;
   const char *s;
   int16_t liv;
   };
@@ -144,6 +144,25 @@ enum OUT_VALUES {
 	OUT_RELOC=-2,
 	OUT_START=-1,
 	OUT_VALUE=0
+	};
+
+enum ADDR_MODE {
+	ADDR_IMPL=1,
+	ADDR_REG8=2,
+	ADDR_IMM8=4,
+	ADDR_ABS=7,
+	ADDR_ABSX=8,
+	ADDR_ABSY=9,
+#if Z80  
+	ADDR_CONDIZ_IMM=40,
+	ADDR_CONDIZ=41,
+#elif _6502
+	ADDR_ZP=5,
+	ADDR_ZPX=6,
+	ADDR_ZPY=16,
+#elif I8051
+#elif ST62
+#endif
 	};
 
 struct LINE_DEF {
