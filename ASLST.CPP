@@ -9,14 +9,19 @@ extern char OUS[256];
 #define ACORN FALSE
 #define GD 		FALSE 	      // CONVENZIONI SUI NOMIFILE
 extern signed char WarnLevel;
+extern uint8_t CPULevel;
 uint16_t PageLength=66;
 uint16_t LineLength=80;        // in realta non e' ancora usato
 
 struct ERRORE Errs[]={
+#if PIC==16 || PIC==18
+  302,"register not in bank0, check page bits",0x0,
+#endif
   1000,"errore interno sconosciuto - contattare ADPM",0x10,
   1001,"errore interno (fine memoria)",0x10,
   1004,"EOF inaspettato",0x10,
   1006,"non atteso",0,
+  1007,"non implementato",0,
   1013,"impossibile aprire il file sorgente",0x10,
   1015,"impossibile aprire il file include",0x10,
   1018,"#elif inatteso",0x10,
@@ -26,18 +31,20 @@ struct ERRORE Errs[]={
   1022,"#endif atteso",0x10,
   1035,"espressione troppo complessa, semplificarla",0,
   1037,"impossibile aprire il file oggetto",0x10,
-  1038,"impossibile aprire il file esadecimale",0x10,
+  1038,"impossibile aprire il file",0x10,
   2007,"#define syntax",0,
   2010,"invalid formal list",0,
+  2011,"macro parameter",0,
   2015,"too many chars in costant",0,
   2016,"costante errata",0,
   2017,"sequenza di escape illegale",0,
-  2036,"left operand must have struct/union type:",0,
-  2038,"not struct/union member:",0x10,
-  2039,"-> requires struct/union pointer",0x10,
+  2036,"left operand must have struct/union type",0,
+  2038,"not struct/union member",0x10,
+//  2039,"-> requires struct/union pointer",0x10,
   2040,". requires struct/union name",0x10,
   2054," atteso",0,
   2057,"attesa costante",0,
+  2058,"valore troppo grande",0,
   2060,"errore di sintassi",0x10,
   2061,"codice operativo sconosciuto",0x10,
   2062,"operando errato",0x10,
@@ -45,18 +52,28 @@ struct ERRORE Errs[]={
   2064,"dimensione operando sbagliata",0,
   2065,"non definito",0x10,
   2066,"simbolo PUBLIC non definito",0x10,
+#ifndef I8086
   2067,"istruzione estesa o non standard",0,
+#else
+	2067,"non valida per questa CPU",0,
+#endif
+  2068,"tipo di indirizzamento errato",0x10,
+  2069,"inizializzando",0,
   2079,"uses undefined struct/union",0x10,
   2086,"ridefinito",0,
   2100,"manca ENDP o ENDC",0,
   2101,"emissione di dati al di fuori di un segmento",0,
   2102,"emissione di codice in un segmento dati",0,
-  2103,"errore nella nidificazione dei blocchi",0,
+  2103,"emissione di dati in un segmento BSS",0,
+  2104,"sovrascrittura byte",0,
+  2108,"errore nella nidificazione dei blocchi",0,
   2115,"tipi incompatibili",0,
   2137,"costante carattere vuota",0,
   4002,"flag sconosciuto e ignorato",0,
   4010,"compattazione di salto assoluto",0,
   4011,"estensione di salto relativo",0,
+  4012,"indirizzamento istruzione modificato",0,
+  4013,"operando troncato",0,
   4099,"" /*"user-defined"*/,0,
   -1,NULL,0
   };
@@ -91,6 +108,12 @@ char *FNTrasfNome(char *A) {
   return A;
   }
 
+int PROCError(int Er, int32_t n) {
+  char myBuf[128];
+
+	sprintf(myBuf,"%d",n);
+	return PROCError(Er, myBuf);
+	}
 int PROCError(int Er, const char *a) {
   int i,ch;
   char myBuf[128];
@@ -100,15 +123,7 @@ int PROCError(int Er, const char *a) {
 
 
   if(OutError && FIn) {    // solo se il file source e' realmente aperto...
-    do {
-      fseek(FIn,-2,SEEK_CUR);
-      if(ftell(FIn)<1)
-        break;
-      ch=getc(FIn);
-      } while(ch != '\n');
-    FNGetLine(ftell(FIn),myBuf);
-    fputc('\n',stderr);
-    fputs(myBuf,stderr);
+    fputs(theLine,stderr);
     fputc('\n',stderr);
     }
   fprintf(stderr,"%s: (%d): errore %d ",__file__,__line__,Er);
@@ -129,6 +144,31 @@ int PROCError(int Er, const char *a) {
   if(FPre)
     fclose(FPre);
   if(FObj) {
+#if PIC==16 || PIC==18
+		extern uint8_t outCnt,oldT;
+		if(!(outCnt & 1)) {		// ev. residuo dispari 16bit :) brutto ma ok
+			sprintf(myBuf," %02X",oldT);
+		  PROCOut1(myBuf,NULL,TRUE);
+			}
+#endif
+#if GD24032
+		extern uint8_t outCnt,oldT,oldT2,oldT3;
+		if(!(outCnt & 1)) {		// ev. residuo dispari 32bit :) brutto ma ok
+			sprintf(myBuf," %02X",oldT);
+		  PROCOut1(myBuf,NULL,TRUE);
+			}
+		outCnt--;
+		if(!(outCnt & 1)) {		// ev. residuo dispari 32bit :) brutto ma ok
+			sprintf(myBuf," %02X",oldT);
+		  PROCOut1(myBuf,NULL,TRUE);
+			}
+		outCnt--;
+		if(!(outCnt & 1)) {		// ev. residuo dispari 32bit :) brutto ma ok
+			sprintf(myBuf," %02X",oldT);
+		  PROCOut1(myBuf,NULL,TRUE);
+			}
+#endif
+
     fclose(FObj);
     remove(OUS);
     }
@@ -149,7 +189,7 @@ int PROCWarn(int Er, const char *a) {
   i=0;
   while(Er != Errs[i].t && Errs[i].t)
     i++;
-  if(Errs[i].liv <= WarnLevel) {
+  if(Errs[i].liv >= WarnLevel) {
 	  sprintf(myBuf,"%s: (%d): warning %d: %s %s\n",__file__,__line__,Er,Errs[i].s,a ? a : ".");
 //		if(myBuf[strlen(myBuf)-1]=='\n')
 //			myBuf[strlen(myBuf)-1]=0;
@@ -160,44 +200,192 @@ int PROCWarn(int Er, const char *a) {
   return 0;
   }
 
-void InOrderVar(FILE *FO,struct VARS *V) {
+void InOrderVar(FILE *FO,const struct VARS *V,uint32_t filter=0);
+void InOrderVar(FILE *FO,const struct VARS *V,uint32_t filter) {
+	const struct VARS *V2;
 
 	if(!V)
 	  return;
 
-	InOrderVar(FO,V->left);
-  fprintf(FO,"\t%-32s\t%6X:%04X\t%4X\t%4X\t%s\n",V->label,HIWORD(V->value),LOWORD(V->value),V->type,V->size,V->proc ? V->proc->label : ((char *)""));
-	InOrderVar(FO,V->right);
+	InOrderVar(FO,V->left,filter);
+	V2=V;
+	while(V2) {
+		if(filter) {
+			if(!(V2->type & filter))
+				goto skippa;
+			}
+	#if GD24032
+		fprintf(FO,"\t%-32s\t%10X:%08LX\t%6X\t%6X\t-8%s\t-8%s\n",V2->label,V2->segm,LODWORD(V2->value),		// BUG C finire!
+	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->label,V->segm,V->value,		// credo si schianti qua se value è 64 bit...
+	#else
+		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t%-8s\t%-8s\n",V2->label,V2->segm,V2->value,
+	#endif
+			V2->type,V2->size,
+			V2->tag ? ((struct VARS *)(V2->tag))->label : "",
+			V2->proc ? V2->proc->label : ((char *)""));
+		if(V2->type & VAR_FUNZ)
+			fprintf(FO,"\t-\t%-32s\t%15X\t%12s\n",
+				V2->label,V2->dim,V2->type & VAR_PUBLIC ? "public" : "");
+
+skippa:
+		V2=V2->next;
+		}
+
+	InOrderVar(FO,V->right,filter);
+	}
+
+uint16_t InOrderVar2(struct VARS **V2,const struct VARS *V) {
+	static uint16_t n=0;
+
+	if(!V)
+	  return 0;
+
+	InOrderVar2(V2,V->left);
+	*V2=(struct VARS *)realloc(*V2,sizeof(struct VARS)*(n+1));
+	memcpy(*V2+n,V,sizeof(struct VARS));
+	((*V2)+n)->next=NULL;
+	n++;
+	InOrderVar2(V2,V->right);
+
+	return n;
+	}
+
+void InOrderAggr(FILE *FO,const struct TAGS *V,uint32_t filter=0);
+void InOrderAggr(FILE *FO,const struct TAGS *V,uint32_t filter) {
+	const struct TAGS *V2;
+	uint8_t level;
+
+	if(!V)
+	  return;
+
+	InOrderAggr(FO,V->left,filter);
+	V2=V;
+	level=0;
+	while(V2) {
+		if(filter) {
+			if(!(V2->type & filter))
+				goto skippa;
+			}
+	#if GD24032
+		fprintf(FO,"\t%s%-32s\t%6X\t%4X\t%2u\t%4X\t-8%s\n",level>0 ? "- " : "",V2->label,		// BUG C finire!
+	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->label,V->segm,V->value,		// credo si schianti qua se value è 64 bit...
+	#else
+		fprintf(FO,"\t%s%-32s\t%6X\t% 8X\t% 5u\t% 5X\t%-10s\n",level>0 ? "- " : "",V2->label,
+	#endif
+//		fprintf(FO,"\t%-32s\t%s\n",T2->label,T2->tipo ? "Record" : "Struc");
+			V2->type,V2->size,V2->pos,V2->value,
+			V2->tag ? ((struct TAGS *)(V2->tag))->label : ""
+			);
+
+skippa:
+		level++;
+		V2=V2->next;
+		}
+
+	InOrderAggr(FO,V->right,filter);
 	}
 
 int PROCV(FILE *FO) {
   int t,i;
-  struct VARS *V;
+//  struct VARS *V;
+  struct LINE_DEF *T;
+  struct TAGS *T2;
 
-  fprintf(FO,"\n\n\t%-32s\t  %-10s\t%-4s\t%-6s\t%-8s\n","Variabili e label:","Valore","Tipo","Size","Proc");
+  fputc('\n',FO);
+  fprintf(FO,"\n\n%-46s\t%-12s\t%-4s\t%-6s\t%-8s\n",
+		"Variabili e label (per nome):","Valore","Tipo","Size","Parent","Proc");
   InOrderVar(FO,Var);
 //  V=Var;
 //  while(V) {
 //    fprintf(FO,"\t%-32Fs\t%10lx\t%4x\t%4x\t%Fs\n",V->label,V->value,V->type,V->size,V->proc ? V->proc->label : ((char far *)""));
 //    V=V->next;
 //    }      
-  fputc('\n',FO);
-  V=Var;
+//  fputc('\n',FO);
+  /* messo sopra 
+	V=Var;
   while(V) {
     if(V->type & 0x100)
       fprintf(FO,"Proc: %-32s\t%10s\t%4X\n",
 				V->label,V->type & 0x200 ? "public" : "",V->dim);
     V=V->next;
-    }
-  fputc('\n',FO);
+    }*/
+//  fputc('\n',FO);
+	PROCV2(FO);
+
+  fprintf(FO,"\nSegmenti\t%36s\t%4s\t%5s\t%12s\n","Tipo","Align","Base","Dimensione");
   for(t=0; t<Segs; t++) {
 //    if(CurAddr[t]>0)                        // se il segmento è usato
-    fprintf(FO,"Seg. (%02X): %-32s\t%06X\t%06lX\t%06lX\n",t+1,Seg[t].label,Seg[t].type,
-			Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr,
-			Seg[t].BaseAddr==0xffffffff ? Seg[t].len : Seg[t].len-Seg[t].BaseAddr);
+#if I8086
+		if(CPULevel<3) {
+#endif
+			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%04lX\t  %06lX\n",t+1,Seg[t].label,Seg[t].type,Seg[t].align,
+				HIWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
+				LOWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
+	//			Seg[t].BaseAddr==0xffffffff ? Seg[t].len : Seg[t].len-Seg[t].BaseAddr);
+				Seg[t].len);
+#if I8086
+			}
+		else {
+			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%08lX\t  %06lX\n",t+1,Seg[t].label,Seg[t].type,Seg[t].align,
+				HIWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
+				LOWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
+	//			Seg[t].BaseAddr==0xffffffff ? Seg[t].len : Seg[t].len-Seg[t].BaseAddr);
+				Seg[t].len);
+			}
+#endif
     }
-  fputc('\n',FO);
+//  fputc('\n',FO);
+  
+  fprintf(FO,"\nStruc/Record\t%30s\t%6s\t%7s\t%5s\t%6s\n","Tipo","Dimensione","Offset","Valore","Parent");
+  InOrderAggr(FO,StrTag);
+
+  fprintf(FO,"\nDefine\n");
+  T=RootDef;
+  while(T) {
+	  fprintf(FO,"\t%-32s\t%-32s\n",T->s,T->s+strlen(T->s)+1);
+    T=T->next;
+    }
+
+  fprintf(FO,"\nMacro\n");
+  T=RootMacro;
+  while(T) {
+	  fprintf(FO,"\t%-32s\t%-32s\n",T->s,T->s+strlen(T->s)+1);
+    T=T->next;
+    }
+
     
   return 0;
   }
 
+int subCmpVarAddr(struct VARS *v1, struct VARS *v2) {
+
+  return v1->value==v2->value ? 0 : 
+		((uint64_t)MAKEDLONG(v1->value,v1->segm)>(uint64_t)MAKEDLONG(v2->value,v2->segm) ? 1 : -1);
+  }
+
+int PROCV2(FILE *FO) {
+  int n,i;
+  struct VARS *V2=NULL,*V;
+
+  fprintf(FO,"\n%-46s\t%-12s\t%-4s\t%-6s\t%-8s\n",
+		"Variabili e label (per valore):","Valore","Tipo","Size","Parent","Proc");
+  n=InOrderVar2(&V2,Var);
+	qsort(V2,n,sizeof(struct VARS),(int (*)(const void *, const void *))subCmpVarAddr);
+  for(i=0; i<n; i++) {
+		V=&V2[i];
+#if GD24032
+		fprintf(FO,"\t%-32s\t%10X:%08lX\t%6X\t%6X\t  %s\t  %s\n",V->label,V->segm,LODWORD(V->value),		// BUG C finire!
+#else
+		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t  %s\t  %s\n",V->label,V->segm,V->value,
+#endif
+			V->type,V->size,
+			V->tag ? ((struct VARS *)(V->tag))->label : "",
+			V->proc ? V->proc->label : ((char *)""));
+		if(V->type & VAR_FUNZ)
+			fprintf(FO,"\t-\t%-32s\t%15X\t%12s\n",
+				V->label,V->dim,V->type & VAR_PUBLIC ? "public" : "");
+    }      
+//  fputc('\n',FO);
+
+  return 0;
+	}

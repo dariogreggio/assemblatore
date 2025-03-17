@@ -4,10 +4,10 @@
 #include <ctype.h>
 #include "as.h"
 
-int IfDefs;
+signed char IfDefs;
 struct LINE_DEF *RootDef,*LastDef;
 struct LINE_DEF *RootMacro,*LastMacro;
-int UNDEFD;
+signed char UNDEFD;
 FILE *FPre;
 
 struct LINE_DEF *PROCInserLista(struct LINE_DEF *Root, struct LINE_DEF *Last, struct LINE_DEF *New);
@@ -48,7 +48,7 @@ char *FNGetParm(FILE *FI, char *s) {
 
 char *FNParse(const char *A, int *I, char *s) {
   int B=0,Q=0,Go=0,i,ch;
-  char T[128],C[64];
+//  char T[128],C[64];
               
   i=0;          
   do {
@@ -82,7 +82,8 @@ char *FNParse(const char *A, int *I, char *s) {
 
 char *FNGrab(FILE *FI, char *s) {
   register int ch;
-  int Q=0,Q1=0,Go=0,W=0,i;
+  unsigned char Q=0,Q1=0,Go=0,W=0;
+	int i;
   char MyBuf[128];
              
   i=0;         
@@ -118,7 +119,7 @@ char *FNGrab(FILE *FI, char *s) {
 	    }
 	  } while(!Go);
 	if(W) {
-	  fseek(FI,-1,SEEK_CUR);
+    theLinePtr--;
 	  i--;
 	  } 
 	*(s+i)=0;
@@ -188,7 +189,31 @@ struct LINE_DEF *FNDefined(const char *A) {
   return 0;
   }
 
-int PROCDefine(char *A, char *B) {    
+struct LINE_DEF *FNMacro(const char *A) {
+  char *I;   
+  struct LINE_DEF *T;
+  
+  T=RootMacro;
+  while(T) {
+    I=strchr(T->s,' ');
+    if(I) {              
+      if(strlen(A) == (I-T->s)) {
+        if(!strnicmp(T->s,A,I-(T->s))) { 
+          return T;
+          }  
+        }
+      }
+    else {
+      if(!stricmp(T->s,A)) {
+        return T;
+        }
+      }
+    T=T->next;
+    }
+  return 0;
+  }
+
+int PROCDefine(const char *A, const char *B) {    
   struct LINE_DEF *New;
   int i;
   
@@ -205,6 +230,28 @@ int PROCDefine(char *A, char *B) {
   strcpy(New->s,A);
   i=strlen(New->s);
   strcpy(New->s+i+1,B);
+	New->used=0;
+  
+  return 0;
+  }
+
+int PROCDefineMacro(const char *A, const char *B) {    
+  struct LINE_DEF *New;
+  int i;
+  
+  i=strlen(A)+strlen(B);
+  New=(struct LINE_DEF *)malloc(i+sizeof(struct LINE_DEF)+4);
+  if(!New) {
+    PROCError(1001,"Fine memoria DEFINE");
+    }
+  if(RootMacro)
+    LastMacro=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootMacro,(struct LINE_DEF *)LastMacro,(struct LINE_DEF *)New);
+  else                                          
+    RootMacro=LastMacro=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootMacro,(struct LINE_DEF *)LastMacro,(struct LINE_DEF *)New);  
+  strcpy(New->s,A);
+  i=strlen(New->s);
+  strcpy(New->s+i+1,B);
+	New->used=0;
   
   return 0;
   }
@@ -219,8 +266,8 @@ char *FNGetNextPre(FILE *FI, int F, char *s) {
   i=0;
   do {
     switch(*A) {
-      case 10:
-      case 13:
+      case '\r':
+      case '\n':
       case '\t':
         Go=TRUE;
         break;
@@ -243,7 +290,7 @@ char *FNGetNextPre(FILE *FI, int F, char *s) {
     if(!Go)
       FNGrab(FI,A);
     } while(!Go);
-  fseek(FI,-1,SEEK_CUR);
+  theLinePtr--;
   *(s+i)=0;
   return s;
   }
@@ -271,12 +318,12 @@ char *FNPreProcess(FILE *FI, const char *A, char *s) {
 //          printf("FORM %s\n",TS);
 	        ch=*(s+i);
 	        if(!*TS) 
-	          PROCError(2060,NULL);
+	          PROCError(2060);
 	        FNGetParm(FI,T1S);
 //	        if(debug>1)
 //	          printf("ATT %s\n",T1S);
 	        if(!ch)
-	          PROCError(2010,NULL);
+	          PROCError(2010);
 	        do {
 	          J1=J;
 	          FNGrab1(JS,&J1,&J,MyBuf);
@@ -291,7 +338,7 @@ char *FNPreProcess(FILE *FI, const char *A, char *s) {
 	        } while(ch != ')');
 	      }
 	    else {
-	      PROCError(2010,NULL);
+	      PROCError(2010);
 	      }
 	    }
     strcpy(s,JS);
@@ -301,6 +348,117 @@ char *FNPreProcess(FILE *FI, const char *A, char *s) {
     }
   return s;
   }
+
+char *TranslateMacro(const struct LINE_DEF *m,const char *smacro,char *text,const char *sparm) {
+//https://onlinedocs.microchip.com/pr/GUID-E06F3258-483F-4A7B-B1F8-69933E029363-en-US-2/index.html?GUID-9D7085C9-7291-4DC8-B987-81828A1E26DA
+//https://www.tutorialspoint.com/assembly_programming/assembly_macros.htm
+// accetto %1 o @1 (o anche \1 ??) diciamo :)
+	char *d;
+	const char *s,*s1;
+	uint8_t parmCnt=0;
+	char parms[10][32];
+	char textOut[1024]={0};
+	char myBuf[128];
+  register int ch;
+  unsigned char Q,Q1,Go,W,i;
+	//smacro=MOVFW
+	//text=MOVF %1,W		=>  MOVF 33,W
+	//sparm=33
+
+	s=sparm;		// costruisco array parametri formali
+	do {
+		while(isspace(*s))
+			s++;
+		if(*s==';')		//
+			break;
+		s1=s;
+		while(iscsym/*isasym*/(*s))
+			s++;
+		if(*s1) {
+			if(parmCnt<10) {
+				strncpy(parms[parmCnt],s1,s-s1);
+				parms[parmCnt][s-s1]=0;
+				parmCnt++;
+				}
+			else
+				break;
+			}
+		s++;
+		if(*s==',')		// direi obbligatorio...
+			s++;
+		if(*s==';')		// ma GESTIRE APICI!
+			break;
+		} while(*s1);
+
+	s=text;
+	do {
+		*myBuf=0;
+		d=myBuf;
+		i=0;
+		Q=Q1=FALSE;
+		W=Go=FALSE;
+		for(;;) {
+			ch=*s++;
+	/*	  if(T == ';') {
+				do {
+					T=getc(FI);
+					} while(T != EOF && T != '\n');
+				T='\n';  
+				}
+				*/
+			if(!Q1)
+				if(ch=='\"')
+					Q=!Q;
+			if(!Q)
+				if(ch=='\'')
+					Q1=!Q1;
+			if(!Q && !Q1) {
+				if(isalnum(ch) || (ch=='_') || (ch=='$') || (ch=='?') || (ch=='%') || (ch=='@'))		// csym() ??
+					W=TRUE;
+				else {
+					if(!W)
+						*(d+ i++)=ch;
+					else
+						s--;
+					break;
+					}
+				}          
+			else {
+				if(ch=='\n' || !ch)
+					break;
+				}
+			*(d+ i++)=ch;
+			}
+		*(d+i)=0;
+		if(*d=='%') {
+			if(*(d+1)=='%') {
+				itoa(m->used,textOut+strlen(textOut),10);
+				goto found;
+				}
+			else {
+				i=*(d+1)-'0';
+				// (@@ o %% dovrebbe restituire il "numero di invocazioni della macro" https://what-when-how.com/microcontrollers/macro-assemblers-microcontrollers/
+				if(i==0) {
+					itoa(parmCnt,textOut+strlen(textOut),10);
+					goto found;
+					}
+				else if(i>0 && i<=9) {
+					if(i>parmCnt && !CPass)
+						PROCWarn(2011,"");
+					strcat(textOut,parms[i-1]);
+					goto found;
+					}
+				}
+			}
+		strcat(textOut,d);
+found:
+		;
+		} while(*s);
+
+
+	strcpy(text,textOut);
+	return text;
+	}
 
 struct LINE_DEF *PROCInserLista(struct LINE_DEF *Root, struct LINE_DEF *Last, struct LINE_DEF *New) {
   struct LINE_DEF *A;      
