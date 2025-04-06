@@ -10,6 +10,10 @@ extern char OUS[256];
 #define GD 		FALSE 	      // CONVENZIONI SUI NOMIFILE
 extern signed char WarnLevel;
 extern uint8_t CPULevel;
+extern uint8_t inMacroExecuting,macroLineNumber;
+extern struct LINE_DEF *CurrMacro;
+FILE *FErr;
+
 uint16_t PageLength=66;
 uint16_t LineLength=80;        // in realta non e' ancora usato
 
@@ -24,6 +28,7 @@ struct ERRORE Errs[]={
   1007,"non implementato",0,
   1013,"impossibile aprire il file sorgente",0x10,
   1015,"impossibile aprire il file include",0x10,
+  1017,"troppi livelli #if/#endif",0x10,
   1018,"#elif inatteso",0x10,
   1019,"#else inatteso",0x10,
   1020,"#endif inatteso",0x10,
@@ -35,6 +40,7 @@ struct ERRORE Errs[]={
   2007,"#define syntax",0,
   2010,"invalid formal list",0,
   2011,"macro parameter",0,
+  2012,"macro redefinition",0,
   2015,"too many chars in costant",0,
   2016,"costante errata",0,
   2017,"sequenza di escape illegale",0,
@@ -59,6 +65,8 @@ struct ERRORE Errs[]={
 #endif
   2068,"tipo di indirizzamento errato",0x10,
   2069,"inizializzando",0,
+  2070,"non standard",0,
+  2071,"operando mancante",0x10,
   2079,"uses undefined struct/union",0x10,
   2086,"ridefinito",0,
   2100,"manca ENDP o ENDC",0,
@@ -67,6 +75,7 @@ struct ERRORE Errs[]={
   2103,"emissione di dati in un segmento BSS",0,
   2104,"sovrascrittura byte",0,
   2108,"errore nella nidificazione dei blocchi",0,
+  2109,"PROCedure nidificate",0,
   2115,"tipi incompatibili",0,
   2137,"costante carattere vuota",0,
   4002,"flag sconosciuto e ignorato",0,
@@ -115,7 +124,7 @@ int PROCError(int Er, int32_t n) {
 	return PROCError(Er, myBuf);
 	}
 int PROCError(int Er, const char *a) {
-  int i,ch;
+  int i;
   char myBuf[128];
 
 //	if(a[strlen(a)-1]=='\r')
@@ -125,15 +134,33 @@ int PROCError(int Er, const char *a) {
   if(OutError && FIn) {    // solo se il file source e' realmente aperto...
     fputs(theLine,stderr);
     fputc('\n',stderr);
+		if(FErr) {
+	    fputs(theLine,FErr);
+		  fputc('\n',FErr);
+			}
     }
   fprintf(stderr,"%s: (%d): errore %d ",__file__,__line__,Er);
+	if(FErr) {
+	  fprintf(FErr,"%s: (%d): errore %d ",__file__,__line__,Er);
+		}
   i=0;
   while (Er != Errs[i].t && Errs[i].t)
     i++;
   fputs(Errs[i].s,stderr);
+	if(FErr) {
+	  fputs(Errs[i].s,FErr);
+		}
   if(a && *a)
     fprintf(stderr,": %s",a);
+	if(CurrMacro) {
+		if(FErr) {
+	    fprintf(FErr," (macro linea %u)",macroLineNumber);
+			}
+    fprintf(stderr," (macro linea %u)",macroLineNumber);
+		}
   fputc('\n',stderr);
+	if(FErr)
+	  fputc('\n',FErr);
   
   if(FMap)
     fclose(FMap);
@@ -195,6 +222,8 @@ int PROCWarn(int Er, const char *a) {
 //			myBuf[strlen(myBuf)-1]=0;
 	  fprintf(stderr,myBuf);
 	  PROCOut1(myBuf,NULL,1);     // mette i warning in file lst
+		if(FErr)
+			fprintf(FErr,myBuf);
 	  }
   
   return 0;
@@ -215,17 +244,22 @@ void InOrderVar(FILE *FO,const struct VARS *V,uint32_t filter) {
 				goto skippa;
 			}
 	#if GD24032
-		fprintf(FO,"\t%-32s\t%10X:%08LX\t%6X\t%6X\t-8%s\t-8%s\n",V2->label,V2->segm,LODWORD(V2->value),		// BUG C finire!
-	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->label,V->segm,V->value,		// credo si schianti qua se value è 64 bit...
+		fprintf(FO,"\t%-32s\t%10X:%08LX\t%6X\t%6X\t-8%s\t-8%s",V2->name,V2->segm & 0xffff,LODWORD(V2->value),		// BUG C finire!
+	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->name,V->segm,V->value,		// credo si schianti qua se value è 64 bit...
 	#else
-		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t%-8s\t%-8s\n",V2->label,V2->segm,V2->value,
+		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t%-8s\t%-8s",V2->name,V2->segm & 0xffff,V2->value,
 	#endif
 			V2->type,V2->size,
-			V2->tag ? ((struct VARS *)(V2->tag))->label : "",
-			V2->proc ? V2->proc->label : ((char *)""));
+			V2->tag ? ((struct VARS *)(V2->tag))->name : "",
+			V2->proc ? V2->proc->name : ((char *)""));
 		if(V2->type & VAR_FUNZ)
-			fprintf(FO,"\t-\t%-32s\t%15X\t%12s\n",
-				V2->label,V2->dim,V2->type & VAR_PUBLIC ? "public" : "");
+			fprintf(FO,"\n\t-\t%-32s\t%15X\t%12s\n",
+				V2->name,V2->dim,V2->type & VAR_PUBLIC ? "public" : "");
+		else
+			fprintf(FO,"%12s\n",V->type & VAR_PUBLIC ? "public" : "");
+		if(V2->type & VAR_STRING)
+			fprintf(FO,"\t\t\"%s\"\n",
+				V2->value ? (const char*)V2->value : "");
 
 skippa:
 		V2=V2->next;
@@ -267,14 +301,14 @@ void InOrderAggr(FILE *FO,const struct TAGS *V,uint32_t filter) {
 				goto skippa;
 			}
 	#if GD24032
-		fprintf(FO,"\t%s%-32s\t%6X\t%4X\t%2u\t%4X\t-8%s\n",level>0 ? "- " : "",V2->label,		// BUG C finire!
-	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->label,V->segm,V->value,		// credo si schianti qua se value è 64 bit...
+		fprintf(FO,"\t%s%-32s\t%6X\t% 8X\t% 5u\t% 5X\t%-10s\n",level>0 ? "- " : "",V2->name,		// BUG C finire!
+	//  fprintf(FO,"\t%-32s\t%2X:%06LX\t%4X\t%4X\t  %s\n",V->name,V->segm & 0xffff,V->value,		// credo si schianti qua se value è 64 bit...
 	#else
-		fprintf(FO,"\t%s%-32s\t%6X\t% 8X\t% 5u\t% 5X\t%-10s\n",level>0 ? "- " : "",V2->label,
+		fprintf(FO,"\t%s%-32s\t%6X\t% 8X\t% 5u\t% 5X\t%-10s\n",level>0 ? "- " : "",V2->name,
 	#endif
-//		fprintf(FO,"\t%-32s\t%s\n",T2->label,T2->tipo ? "Record" : "Struc");
+//		fprintf(FO,"\t%-32s\t%s\n",T2->name,T2->tipo ? "Record" : "Struc");
 			V2->type,V2->size,V2->pos,V2->value,
-			V2->tag ? ((struct TAGS *)(V2->tag))->label : ""
+			V2->tag ? ((struct TAGS *)(V2->tag))->name : ""
 			);
 
 skippa:
@@ -287,7 +321,7 @@ skippa:
 
 int PROCV(FILE *FO) {
   int t,i;
-//  struct VARS *V;
+  struct VARS *V;
   struct LINE_DEF *T;
   struct TAGS *T2;
 
@@ -297,7 +331,7 @@ int PROCV(FILE *FO) {
   InOrderVar(FO,Var);
 //  V=Var;
 //  while(V) {
-//    fprintf(FO,"\t%-32Fs\t%10lx\t%4x\t%4x\t%Fs\n",V->label,V->value,V->type,V->size,V->proc ? V->proc->label : ((char far *)""));
+//    fprintf(FO,"\t%-32Fs\t%10lx\t%4x\t%4x\t%Fs\n",V->name,V->value,V->type,V->size,V->proc ? V->proc->name : ((char far *)""));
 //    V=V->next;
 //    }      
 //  fputc('\n',FO);
@@ -306,7 +340,7 @@ int PROCV(FILE *FO) {
   while(V) {
     if(V->type & 0x100)
       fprintf(FO,"Proc: %-32s\t%10s\t%4X\n",
-				V->label,V->type & 0x200 ? "public" : "",V->dim);
+				V->name,V->type & 0x200 ? "public" : "",V->dim);
     V=V->next;
     }*/
 //  fputc('\n',FO);
@@ -318,7 +352,7 @@ int PROCV(FILE *FO) {
 #if I8086
 		if(CPULevel<3) {
 #endif
-			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%04lX\t  %06lX\n",t+1,Seg[t].label,Seg[t].type,Seg[t].align,
+			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%04lX\t  %06lX\n",t+1,Seg[t].name,Seg[t].type,Seg[t].align,
 				HIWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
 				LOWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
 	//			Seg[t].BaseAddr==0xffffffff ? Seg[t].len : Seg[t].len-Seg[t].BaseAddr);
@@ -326,7 +360,7 @@ int PROCV(FILE *FO) {
 #if I8086
 			}
 		else {
-			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%08lX\t  %06lX\n",t+1,Seg[t].label,Seg[t].type,Seg[t].align,
+			fprintf(FO,"\t(%02X): %-32s\t%04X\t%02u\t  %04X:%08lX\t  %06lX\n",t+1,Seg[t].name,Seg[t].type,Seg[t].align,
 				HIWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
 				LOWORD(Seg[t].BaseAddr==0xffffffff ? 0 : Seg[t].BaseAddr),
 	//			Seg[t].BaseAddr==0xffffffff ? Seg[t].len : Seg[t].len-Seg[t].BaseAddr);
@@ -342,14 +376,29 @@ int PROCV(FILE *FO) {
   fprintf(FO,"\nDefine\n");
   T=RootDef;
   while(T) {
-	  fprintf(FO,"\t%-32s\t%-32s\n",T->s,T->s+strlen(T->s)+1);
+	  fprintf(FO,"\t%-32s\t%-32s\n",T->name,T->text);
     T=T->next;
     }
 
   fprintf(FO,"\nMacro\n");
   T=RootMacro;
   while(T) {
-	  fprintf(FO,"\t%-32s\t%-32s\n",T->s,T->s+strlen(T->s)+1);
+	  fprintf(FO," ***MACRO START\n");
+	  fprintf(FO," -\t%s\n",T->name);
+	  fprintf(FO,"    \t%s\n",T->text);		// per qualche motivo raddoppia gli a-capo, se c'erano dei CR/LF nel testo macro...
+		V=T->vars;
+		while(V) {
+			if(!V->type)
+				fprintf(FO,"  P:\t%-32s\n",V->name);
+			V=V->next;
+			}
+		V=T->vars;
+		while(V) {
+			if(V->type)
+				fprintf(FO,"  L:\t%-32s\n",V->name);
+			V=V->next;
+			}
+	  fprintf(FO,"  **MACRO END\n\n");
     T=T->next;
     }
 
@@ -374,16 +423,21 @@ int PROCV2(FILE *FO) {
   for(i=0; i<n; i++) {
 		V=&V2[i];
 #if GD24032
-		fprintf(FO,"\t%-32s\t%10X:%08lX\t%6X\t%6X\t  %s\t  %s\n",V->label,V->segm,LODWORD(V->value),		// BUG C finire!
+		fprintf(FO,"\t%-32s\t%10X:%08lX\t%6X\t%6X\t  %s\t  %s",V->name,LOWORD(V->segm),LODWORD(V->value),		// BUG C finire!
 #else
-		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t  %s\t  %s\n",V->label,V->segm,V->value,
+		fprintf(FO,"\t%-32s\t%10X:%08X\t%6X\t%6X\t  %s\t  %s",V->name,LOWORD(V->segm),V->value,
 #endif
 			V->type,V->size,
-			V->tag ? ((struct VARS *)(V->tag))->label : "",
-			V->proc ? V->proc->label : ((char *)""));
+			V->tag ? ((struct VARS *)(V->tag))->name : "",
+			V->proc ? V->proc->name : ((char *)""));
 		if(V->type & VAR_FUNZ)
-			fprintf(FO,"\t-\t%-32s\t%15X\t%12s\n",
-				V->label,V->dim,V->type & VAR_PUBLIC ? "public" : "");
+			fprintf(FO,"\n\t-\t%-32s\t%15X\t%12s\n",
+				V->name,V->dim,V->type & VAR_PUBLIC ? "public" : "");
+		else
+			fprintf(FO,"%12s\n",V->type & VAR_PUBLIC ? "public" : "");
+		if(V->type & VAR_STRING)
+			fprintf(FO,"\t\t\"%s\"\n",
+				V->value ? (const char*)V->value : "");
     }      
 //  fputc('\n',FO);
 

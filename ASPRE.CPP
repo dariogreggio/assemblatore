@@ -5,9 +5,9 @@
 #include "as.h"
 
 signed char IfDefs;
+signed char UNDEFD[MAX_DEFS];
 struct LINE_DEF *RootDef,*LastDef;
 struct LINE_DEF *RootMacro,*LastMacro;
-signed char UNDEFD;
 FILE *FPre;
 
 struct LINE_DEF *PROCInserLista(struct LINE_DEF *Root, struct LINE_DEF *Last, struct LINE_DEF *New);
@@ -108,7 +108,7 @@ char *FNGrab(FILE *FI, char *s) {
 	    if(ch=='\'')
 	      Q1=!Q1;
 	  if(!Q && !Q1) {
-      if(isalnum(ch) || (ch=='_') || (ch=='$') || (ch=='?')) 
+      if(isalnum(ch) || (ch=='_') || (ch=='$') || (ch=='?'))			// isasym( ??
 	      W=TRUE;
 	    else
 	      Go=TRUE;
@@ -123,7 +123,7 @@ char *FNGrab(FILE *FI, char *s) {
 	  i--;
 	  } 
 	*(s+i)=0;
-	if(!UNDEFD) {
+	if(!UNDEFD[IfDefs]) {
 //	  if(PP) {
 	    strcpy(MyBuf,s);
 	    FNPreProcess(FI,MyBuf,s);
@@ -170,16 +170,16 @@ struct LINE_DEF *FNDefined(const char *A) {
   
   T=RootDef;
   while(T) {
-    I=strchr(T->s,'(');
+    I=strchr(T->name,'(');			// ev. cambiare con VARS / lista parametri
     if(I) {              
-      if(strlen(A) == (I-T->s)) {
-        if(!strncmp(T->s,A,I-(T->s))) { 
+      if(strlen(A) == (I-T->name)) {
+        if(!strncmp(T->name,A,I-(T->name))) { 
           return T;
           }  
         }
       }
     else {
-      if(!strcmp(T->s,A)) {
+      if(!strcmp(T->name,A)) {
         return T;
         }
       }
@@ -195,31 +195,29 @@ struct LINE_DEF *FNMacro(const char *A) {
   
   T=RootMacro;
   while(T) {
-    I=strchr(T->s,' ');
+    I=strchr(T->name,' ');
     if(I) {              
-      if(strlen(A) == (I-T->s)) {
-        if(!strnicmp(T->s,A,I-(T->s))) { 
+      if(strlen(A) == (I-T->name)) {
+        if(!strnicmp(T->name,A,I-(T->name))) { 
           return T;
           }  
         }
       }
     else {
-      if(!stricmp(T->s,A)) {
+      if(!stricmp(T->name,A)) {
         return T;
         }
       }
     T=T->next;
     }
-  return 0;
+  return NULL;
   }
 
 int PROCDefine(const char *A, const char *B) {    
   struct LINE_DEF *New;
-  int i;
   
-  i=strlen(A)+strlen(B);
 //  myLog->print(0,"define %s!%s\n",A,B);
-  New=(struct LINE_DEF *)malloc(i+sizeof(struct LINE_DEF)+4);
+  New=(struct LINE_DEF*)malloc(sizeof(struct LINE_DEF));
   if(!New) {
     PROCError(1001,"Fine memoria DEFINE");
     }
@@ -227,20 +225,20 @@ int PROCDefine(const char *A, const char *B) {
     LastDef=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootDef,(struct LINE_DEF *)LastDef,(struct LINE_DEF *)New);
   else                                          
     RootDef=LastDef=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootDef,(struct LINE_DEF *)LastDef,(struct LINE_DEF *)New);  
-  strcpy(New->s,A);
-  i=strlen(New->s);
-  strcpy(New->s+i+1,B);
+  strcpy(New->name,A);
+	int i=strlen(B);
+	New->text=(char*)malloc(i+1);
+  strcpy(New->text,B);
 	New->used=0;
+	New->vars=NULL;
   
   return 0;
   }
 
-int PROCDefineMacro(const char *A, const char *B) {    
+struct LINE_DEF *PROCDefineMacro(const char *A, const char *B) {    
   struct LINE_DEF *New;
-  int i;
   
-  i=strlen(A)+strlen(B);
-  New=(struct LINE_DEF *)malloc(i+sizeof(struct LINE_DEF)+4);
+  New=(struct LINE_DEF*)malloc(sizeof(struct LINE_DEF));
   if(!New) {
     PROCError(1001,"Fine memoria DEFINE");
     }
@@ -248,13 +246,55 @@ int PROCDefineMacro(const char *A, const char *B) {
     LastMacro=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootMacro,(struct LINE_DEF *)LastMacro,(struct LINE_DEF *)New);
   else                                          
     RootMacro=LastMacro=(struct LINE_DEF *)PROCInserLista((struct LINE_DEF *)RootMacro,(struct LINE_DEF *)LastMacro,(struct LINE_DEF *)New);  
-  strcpy(New->s,A);
-  i=strlen(New->s);
-  strcpy(New->s+i+1,B);
+  strcpy(New->name,A);
+	if(B) {
+		int i=strlen(B);
+		New->text=(char*)malloc(i+1);
+		strcpy(New->text,B);
+		if(New->text[i-1] == '\r' || New->text[i-1] == '\n')
+			New->text[i-1]=0;
+		}
+	else
+		New->text=NULL;
 	New->used=0;
+	New->vars=NULL;
   
-  return 0;
+  return New;
   }
+
+struct LINE_DEF *PROCRedefineMacro(struct LINE_DEF *D, const char *B) {    
+  int i;
+  
+	if(D->text)
+		free(D->text);
+	D->text=(char*)malloc(strlen(B)+1);
+  strcpy(D->text,B);
+	D->used=0;
+
+  return D;
+  }
+
+struct VARS *FNAllocMacroVar(struct LINE_DEF *parent,const char *name,uint8_t type) {
+	struct VARS *v;
+
+	v=(struct VARS*)malloc(sizeof(struct VARS));
+	if(!v)
+		PROCError(1001,"Fine memoria VARS");
+	memset(v,0,sizeof(struct VARS));
+	strncpy(v->name,name,MAX_NAME_LEN);
+	v->type=type;
+	if(parent->vars) {
+		struct VARS *v2=parent->vars;
+		while(v2->next)
+			v2=v2->next;
+		v2->next=v;
+		}
+	else
+		parent->vars=v;
+	
+	return v;
+  }
+
 
 char *FNGetNextPre(FILE *FI, int F, char *s) {
   char A[128];
@@ -349,116 +389,206 @@ char *FNPreProcess(FILE *FI, const char *A, char *s) {
   return s;
   }
 
-char *TranslateMacro(const struct LINE_DEF *m,const char *smacro,char *text,const char *sparm) {
+char *TranslateMacro(const struct LINE_DEF *M,const char *smacro,char *text,const char *sparm) {
 //https://onlinedocs.microchip.com/pr/GUID-E06F3258-483F-4A7B-B1F8-69933E029363-en-US-2/index.html?GUID-9D7085C9-7291-4DC8-B987-81828A1E26DA
 //https://www.tutorialspoint.com/assembly_programming/assembly_macros.htm
 // accetto %1 o @1 (o anche \1 ??) diciamo :)
 	char *d;
 	const char *s,*s1;
 	uint8_t parmCnt=0;
-	char parms[10][32];
-	char textOut[1024]={0};
-	char myBuf[128];
-  register int ch;
-  unsigned char Q,Q1,Go,W,i;
+	char parms[10][32 /*MAX_NAME_LEN+1*/];
+	char textOut[MACRO_SIZE]={0};
+	struct VARS *v;
+	char myBuf[256];
+  unsigned char Go,pass=0,i,inConcat=0;
 	//smacro=MOVFW
 	//text=MOVF %1,W		=>  MOVF 33,W
 	//sparm=33
 
+	for(i=0; i<10; i++)
+		*parms[i]=0;
 	s=sparm;		// costruisco array parametri formali
 	do {
-		while(isspace(*s))
-			s++;
-		if(*s==';')		//
+		s=parse_parm(s,parms[parmCnt]);
+		if(!s || !*s || *parms[parmCnt]==';' /* se commento e 0 parms.... */)
 			break;
-		s1=s;
-		while(iscsym/*isasym*/(*s))
-			s++;
-		if(*s1) {
-			if(parmCnt<10) {
-				strncpy(parms[parmCnt],s1,s-s1);
-				parms[parmCnt][s-s1]=0;
-				parmCnt++;
+		s=parse_parm(s,myBuf,FALSE);
+		if(*myBuf == ';')
+			break;
+		if(s && *myBuf != ',')
+			PROCError(2060);
+		parmCnt++;
+		} while(parmCnt<10);
+
+//				if(__line__==273) {
+//					printf("MACRO %u\n",__line__);
+//					}
+	while(pass<2) {
+		Go=FALSE;
+		s=text;
+		*textOut=0;
+		do {
+			d=myBuf;
+			i=0;
+			while(*s=='\r' || *s=='\n') {		// (cmq, lo faccio qua così parse_parm restituisce NULL se lo trova (utile altrove
+	/*bah*/			if(*textOut && textOut[strlen(textOut)-1] != '\n')
+					strcat(textOut,"\n");
+				s++;
 				}
-			else
+			if(!(s=parse_parm(s,myBuf,TRUE)) || !*myBuf) {
+				Go=1;
 				break;
-			}
-		s++;
-		if(*s==',')		// direi obbligatorio...
-			s++;
-		if(*s==';')		// ma GESTIRE APICI!
-			break;
-		} while(*s1);
-
-	s=text;
-	do {
-		*myBuf=0;
-		d=myBuf;
-		i=0;
-		Q=Q1=FALSE;
-		W=Go=FALSE;
-		for(;;) {
-			ch=*s++;
-	/*	  if(T == ';') {
-				do {
-					T=getc(FI);
-					} while(T != EOF && T != '\n');
-				T='\n';  
 				}
-				*/
-			if(!Q1)
-				if(ch=='\"')
-					Q=!Q;
-			if(!Q)
-				if(ch=='\'')
-					Q1=!Q1;
-			if(!Q && !Q1) {
-				if(isalnum(ch) || (ch=='_') || (ch=='$') || (ch=='?') || (ch=='%') || (ch=='@'))		// csym() ??
-					W=TRUE;
+			if(*myBuf <= ' ') {
+				if(pass)
+					continue;
+				else
+					/*strcat(textOut,"\n")*/;
+				}
+
+			if(!stricmp(d,"local")) {
+	skip_line:
+				while(*s && (*s!='\r' && *s!='\n'))
+					s++;
+				s++;
+	/*bah*/			if(*textOut && textOut[strlen(textOut)-1] != '\n')	// siamo all'inizio cmq!
+					strcat(textOut,"\n");
+				continue;			// skippo, bah sì :)
+				}
+			else if(!strnicmp(d,"if",2)) {		// pre filtratura per sveltire!
+				goto solo_subst;
+				}
+			else if(!stricmp(myBuf,"else")) {
+				goto solo_subst;
+				}
+			else if(!stricmp(myBuf,"endif")) {
+				goto solo_subst;
+				}
+			else if(!stricmp(myBuf,"&")) {
+				inConcat=TRUE;
+				continue;
+				}
+
+solo_subst:
+				if(FNSubstituteVars(M,d,myBuf,parms,parmCnt)) {
+					d=myBuf;
+					goto found;
+					}	
+
+	found:
+				if(inConcat) {
+					strcat(textOut,d);
+					inConcat=FALSE;
+					}
 				else {
-					if(!W)
-						*(d+ i++)=ch;
-					else
-						s--;
-					break;
+					if(isasym(*d) && isasym(textOut[strlen(textOut)-1]))			// migliorare!! salvare ultimo char copiato prima... serve a non rimuovere spazi
+						strcat(textOut," ");
+					strcat(textOut,d);
 					}
-				}          
-			else {
-				if(ch=='\n' || !ch)
-					break;
-				}
-			*(d+ i++)=ch;
-			}
-		*(d+i)=0;
-		if(*d=='%') {
-			if(*(d+1)=='%') {
-				itoa(m->used,textOut+strlen(textOut),10);
-				goto found;
-				}
-			else {
-				i=*(d+1)-'0';
-				// (@@ o %% dovrebbe restituire il "numero di invocazioni della macro" https://what-when-how.com/microcontrollers/macro-assemblers-microcontrollers/
-				if(i==0) {
-					itoa(parmCnt,textOut+strlen(textOut),10);
-					goto found;
-					}
-				else if(i>0 && i<=9) {
-					if(i>parmCnt && !CPass)
-						PROCWarn(2011,"");
-					strcat(textOut,parms[i-1]);
-					goto found;
-					}
-				}
-			}
-		strcat(textOut,d);
-found:
-		;
-		} while(*s);
+			} while(!Go);
 
 
-	strcpy(text,textOut);
+		strcpy(text,textOut);
+		pass++;
+		}
+
 	return text;
 	}
+
+int8_t FNSubstituteVars(const struct LINE_DEF *M,const char *var,char *buf,char parms[10][32],uint8_t parmCnt) {
+	struct VARS *v;
+	uint8_t i;
+
+	if(*var=='%') {
+		if(*(var+1)=='%') {
+			itoa(M->used,buf,10);
+			// (@@ o %% dovrebbe restituire il "numero di invocazioni della macro" https://what-when-how.com/microcontrollers/macro-assemblers-microcontrollers/
+			goto found;
+			}
+		else {
+			i=*(var+1)-'0';
+			if(i==0) {
+				itoa(parmCnt,buf,10);
+				goto found;
+				}
+			else if(i>0 && i<=9) {
+				if(i>parmCnt && !CPass)
+					PROCWarn(2011,"");
+				strcpy(buf,parms[i-1]);
+				goto found;
+				}
+			}
+		}
+
+	if(isadsym(*var)) {		// inutile perder tempo se è un simbolo o altro!
+		v=M->vars;
+		i=0;
+		while(v) {
+			if(!v->type) {
+				if(!stricmp(var,v->name)) {		// prima cerco nei parm...
+					strcpy(buf,parms[i]);
+					goto found;
+					}
+				i++;
+				}
+			v=v->next;
+			}
+		v=M->vars;
+		while(v) {
+			if(v->type && !stricmp(var,v->name)) {			// ...poi nelle local
+				sprintf(buf,"%s_%u_%s",M->name,M->used,v->name);
+				goto found;
+				}
+			v=v->next;
+			}
+		}
+
+found:
+	return 1;
+	}
+
+int8_t FNGetParms(const struct LINE_DEF *M,const char *string,char *s1,char *s2,char parms[10][32],uint8_t parmCnt) {
+	char *s=(char*)string;
+	struct VARS *v;
+	char myBuf[256];
+	int8_t i=0,sep=0;
+
+	*s1=*s2=0;
+	do {
+		s=(char*)parse_parm(s,myBuf);
+		if(!s || !*myBuf)
+			break;
+		if(myBuf[0]=='<') {
+			s=(char*)parse_parm(s,myBuf);
+			sep=1;
+			}
+		if(v=FNCercaVar(myBuf,0,0,FALSE,1)) {
+			if(!(v->type & VAR_STRING))
+				itoa(v->value,myBuf,10);
+			else
+				strcpy(myBuf,(char*)v->value);
+			}
+		if(FNSubstituteVars(M,myBuf,myBuf,parms,parmCnt)) {
+			}
+		if(!i)
+			strcpy(s1,myBuf);
+		else
+			strcpy(s2,myBuf);
+		i++;
+		if(sep) {
+			s=(char*)parse_parm(s,myBuf);
+			if(myBuf[0] != '>')
+				PROCError(2060,myBuf);
+			sep=0;
+			}
+		s=(char*)parse_parm(s,myBuf);
+		if(i<2 && myBuf[0] != ',')
+			PROCError(2060,myBuf);
+		} while(i<2);
+
+	return i;
+	}
+
 
 struct LINE_DEF *PROCInserLista(struct LINE_DEF *Root, struct LINE_DEF *Last, struct LINE_DEF *New) {
   struct LINE_DEF *A;      
@@ -500,6 +630,11 @@ struct LINE_DEF *PROCDelLista(struct LINE_DEF *Root, struct LINE_DEF *Last, stru
 //    else
     A=l->prev;
     }
+	while(l->next) {
+		struct LINE_DEF *l2=l->next;
+		free(l->next);
+		l2=l;
+		}
   free(l);
   if(l==Last)
     return A;

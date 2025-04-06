@@ -2,36 +2,53 @@
 #include <string.h>
 #include <malloc.h>
 #include <math.h>
+#include <ctype.h>
 #include "as.h"
 
 // (2025 forse su registri, su var è ok  SU OPERATORI UNARI NON VA ANCORA!! ~R5 entra in loop... strano
 
 uint8_t Brack=0;       
 extern uint8_t CPULevel;
-extern uint8_t inIfDef;
 
 
+#pragma warning USARE o.l.t !! per costanti/var/stringhe
 struct SEGMENTED_VALUE FNEvalExpr(unsigned char Pty, void *C) {
 	struct OPERAND o;
 	int i;
 
 	memset(&o,0,sizeof(struct OPERAND));
 
-  *(uint64_t*)C=0;
+  memset(C,0,16);		// un tot per coprire le varie possibilità...
   i=FNRev(Pty,&o,C);
     
 	if(i==0) {
 		switch(o.V) {
 			case ARITM_CONST:
-				o.l.v=FNGetASCII((const char*)C);
-//				*(uint64_t*)C=0;
+//				o.l.v=FNGetASCII((const char*)C); no 2025, gestito come stringa, poi nei vari casi
+				if(*(const char*)C=='\"' || *(const char*)C=='\'') {
+					o.l.t=1;
+					}
+				else {
+					*(uint64_t*)C=0;
+					o.l.t=0;
+					}
 				o.l.seg=SEG_UNDEFINED;
 				o.l.valid=TRUE;
 				break;
 			case ARITM_VAR:
+			case ARITM_EOL:
+				// mah credo che andrebbe gestito...
+			case ARITM_UNKNOWN:
+				// idem
 			default:
 				o.l=*(struct SEGMENTED_VALUE *)C;
-				*(uint64_t*)C=0;
+				o.l.t=2;
+				if(o.var) {
+					if(!(o.var->type & VAR_STRING))
+						*(uint64_t*)C=0;
+					}
+				else
+					*(uint64_t*)C=0;
 				o.l.valid=TRUE;
 				break;
 			}
@@ -47,6 +64,7 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
   char RCost[256],TS[256],T1S[256];
   long p,p2;
 	struct OPERAND R;
+	struct SEGMENTED_VALUE *lVCost=(struct SEGMENTED_VALUE *)VCost;
  
   p=theLinePtr;
 //  ROut=LastOut;
@@ -80,10 +98,10 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
           }
         else {
           if(o->V==VQ_OP_VAR) {
-						struct SEGMENTED_VALUE *ll=(struct SEGMENTED_VALUE *)VCost;
-            *ll=*(struct SEGMENTED_VALUE *)TS;
-						ll->seg=SEG_NONE;
-						ll->valid=TRUE;
+            *lVCost=*(struct SEGMENTED_VALUE *)TS;
+						lVCost->seg=SEG_NONE;
+						lVCost->valid=TRUE;
+						lVCost->t=0;
 						}
           else
             strcpy((char*)VCost,TS);
@@ -103,10 +121,10 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
             }
           else {
             if(o->V==VQ_OP_VAR) {
-							struct SEGMENTED_VALUE *ll=(struct SEGMENTED_VALUE *)VCost;
-		          *ll=*(struct SEGMENTED_VALUE *)TS;
-//							ll->seg=SEG_UNDEFINED;
-							ll->valid=TRUE;
+		          *lVCost=*(struct SEGMENTED_VALUE *)TS;
+//							lVCost->seg=SEG_UNDEFINED;
+							lVCost->valid=TRUE;
+//							lVCost->t=0;
 							}
             else
               strcpy((char*)VCost,TS);
@@ -128,7 +146,52 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
                 case '(':
                   Brack++;
                 case '[':
-                  FNRev(99,o,VCost);
+									{
+									struct VARS *myV=(struct VARS*)VCost;
+									myV=o->var;
+									if(myV) {
+										v=FNRev(o->op-1,&R,RCost);
+										if(v<0)
+											return -1;
+										switch(R.V) {
+											case VQ_VAR:
+  											l2=FNGetASCII(RCost);
+												break;
+											case VQ_OP_VAR:
+  											l2=*(NUM_TYPE *)RCost;  
+												break;
+											case VQ_REGISTER:
+												// mah boh
+										    T=FNGetAritElem(TS,o,Co);
+												PROCWarn(2062,"register"/*RCost*/);
+												break;
+											default:
+												PROCError(2062,RCost);
+												break;
+											}
+ 			  			      o->V=0;
+										o->var=NULL;
+										if(myV->type & VAR_ADDRESS /* per ora sorvolo && myV->type & VAR_ARRAY*/) {
+							        lVCost->v=myV->value+l2;
+											}
+										else if(myV->type & VAR_RECORD) {
+							        lVCost->v=myV->value >> (l2*8);		// bah, sì: i byte come fosse array
+											}
+										else {
+// no, arriva anche con Label/Var[index]											PROCError(2062,(char*)TS);
+//							        lVCost->v=myV->value+l2;
+											}
+										o->S=1;		// direi 
+										o->l.valid=TRUE;
+										o->l.v=lVCost->v;
+										o->T = VAR_ARRAY;
+										o->l.seg=SEG_NONE;
+										lVCost->seg=SEG_NONE;
+										PROCCheck(']');
+										}
+									else
+										FNRev(99,o,VCost);
+									}
                   break; 
                 case ')':
                   if(Pty==99) {
@@ -136,28 +199,53 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
                     Pty=1;
                     }
                   else {
+								    theLinePtr--;
+		                Exit=TRUE;
+										}
+									break;
                 case ']':
-							      theLinePtr--;
-                    Exit=TRUE;
-                    }
+							    theLinePtr--;
+                  Exit=TRUE;
                   break;
                 case '.':
 									{
+									if(lVCost->t & 2) {
 										struct VARS *myV=(struct VARS*)VCost;
 										myV=o->var;
-									if(myV && myV->type & (VAR_STRUCT | VAR_UNION)) {
-										struct TAGS *myT;
-										FNLO(TS);
-										if(myT=FNCercaAggr(TS,0,(uint32_t)myV->tag)) {
-						          ((struct SEGMENTED_VALUE *)VCost)->v=myV->value+myT->pos;
-											((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
+										if(myV && myV->type & (VAR_STRUCT | VAR_UNION)) {
+											struct TAGS *myT;
+											FNLO(TS);
+											if(myT=FNCercaAggr(TS,0,(uint32_t)myV->tag)) {
+												lVCost->v=myV->value+myT->pos;
+												lVCost->seg=SEG_UNDEFINED;
 
 
-											o->S=myT->size;
+												o->S=myT->size;
+
+										o->l.valid=TRUE;
+										o->l.v=lVCost->v;
+										o->l.seg=SEG_NONE;
+												}
+											else
+												PROCError(2038,TS);
 
 											}
-										else
-											PROCError(2038,TS);
+										}
+									else if(o->T & (VAR_STRUCT | VAR_UNION)) {
+										struct TAGS *myT;
+										if(myT=(struct TAGS*)lVCost->v) {
+											FNLO(TS);
+											if(myT=FNCercaAggr(TS,0,(uint32_t)myT)) {
+												lVCost->v=myT->pos;
+												lVCost->seg=SEG_NONE;
+
+
+												o->S=1;		// mah direi, di solito
+										o->l.valid=TRUE;
+										o->l.v=lVCost->v;
+										o->l.seg=SEG_NONE;
+											}
+											}
 
 										}
 									else {
@@ -171,6 +259,7 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
                   break;
                 }
               break;
+
             case 2:
               switch(tolower(*TS)) {		// qua ci sono alcuni op. a parole
                 case '-': 
@@ -179,8 +268,8 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
                     goto binaryMinus;
 	                else {
 	                  v=FNRev(2,o,VCost);
-							if(v<0)
-								return -1;
+										if(v<0)
+											return -1;
 										switch(o->V) {
 											case VQ_VAR:
 												l=FNGetASCII((const char*)VCost);
@@ -198,10 +287,10 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 									return -2;
 												break;
 											default:
-												if(((struct SEGMENTED_VALUE *)VCost)->seg)          // no operatori su segmentati (extrn, label)
+												if(lVCost->seg != SEG_NONE && lVCost->seg != SEG_UNDEFINED)          // no operatori su segmentati (extrn, label)
 													PROCError(2062);
-												((struct SEGMENTED_VALUE *)VCost)->v=-((struct SEGMENTED_VALUE *)VCost)->v;  
-//					            ((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;  
+												lVCost->v=-lVCost->v;  
+//					            lVCost->seg=SEG_NONE;  
 												break;
 											}
 	    			        }
@@ -214,11 +303,11 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 										break;
 										}
 									else
-										;
 #endif
+									{
 		              v=FNRev(2,o,VCost);
-							if(v<0)
-								return -1;
+									if(v<0)
+										return -1;
 									switch(o->V) {
 										case VQ_VAR:
 											l=FNGetASCII((const char*)VCost);
@@ -237,22 +326,23 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 											goto fine;
 											break;
 										default:
-											if(((struct SEGMENTED_VALUE *)VCost)->seg)          // no operatori su segmentati (extrn, label)
+											if(lVCost->seg != SEG_NONE && lVCost->seg != SEG_UNDEFINED)          // no operatori su segmentati (extrn, label)
 												PROCError(2062);
-											((struct SEGMENTED_VALUE *)VCost)->v=~((struct SEGMENTED_VALUE *)VCost)->v;  
-//					            ((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;  
+											lVCost->v=~lVCost->v;  
+//					            lVCost->seg=SEG_NONE;  
 											break;
+										}
 										}
 	    			      break;
 
 	              case '!':
 	                v=FNRev(2,o,VCost);
-							if(v<0)
-								return -1;
+									if(v<0)
+										return -1;
 									switch(o->V) {
 										case VQ_VAR:
 											l=FNGetASCII((const char*)VCost);
-											l=l ? 0 : -1;			// preferisco! (lui metterebbe 1
+											l=l ? 0 : 1;			// v. altrove, tipo EQ GT ecc
 #if GD24032
 						          l=MAKEDLONG(LODWORD(l),0);
 #else
@@ -267,10 +357,10 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 											goto fine;
 											break;
 										default:
-											if(((struct SEGMENTED_VALUE *)VCost)->seg)          // no operatori su segmentati (extrn, label)
+											if(lVCost->seg != SEG_NONE && lVCost->seg != SEG_UNDEFINED)          // no operatori su segmentati (extrn, label)
 												PROCError(2062);
-											((struct SEGMENTED_VALUE *)VCost)->v=((struct SEGMENTED_VALUE *)VCost)->v ? 0 : -1;			// preferisco! (lui metterebbe 1
-//					            ((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;  
+											lVCost->v=lVCost->v ? 0 : -1;			// preferisco! (lui metterebbe 1
+//					            lVCost->seg=SEG_NONE;  
 											break;
 										}
 	    			      break;
@@ -280,29 +370,40 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 							if(v<0)
 								return -1;
 #if I8086
-									if(tolower(TS[1]) == 'e') {		// SEGMENT
+									if(tolower(TS[1]) == 'e') {		// SEG 
 										switch(o->V) {
-											case VQ_OP_VAR:
+											case VQ_OP_VAR:			// boh...
 		  									l=*(NUM_TYPE *)VCost;  
+												lVCost->v=HIWORD(l);
+												lVCost->seg=CurSeg;
 												break;
-											case VQ_VAR:		// serve davvero qua??
-												l=FNGetASCII((const char*)VCost);
+											case VQ_VAR:		// 
+												if(o->l.seg != SEG_NONE && o->l.seg != SEG_UNDEFINED)
+													lVCost->v= (Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00) ? CurSeg : HIWORD(Seg[o->l.seg].BaseAddr);
+												else
+													lVCost->v=HIWORD(o->l.v);
+												lVCost->seg=o->l.seg;
 												break;
 											default:
 												PROCError(2062);
 												break;
 											}
-					          ((struct SEGMENTED_VALUE *)VCost)->v=HIWORD(l);
-										((struct SEGMENTED_VALUE *)VCost)->seg=CurSeg;
+										o->S=2;
+		                o->T=VAR_NUMBER;
+										o->V=VQ_OP_VAR;		// serve a indicare che è una costante, 2025, non so se interessa
 										}
-									else				// :)
-										;
+									else if(tolower(TS[1]) == 'h')		// SHORT
+										// FORZO JMP SHORT di là...
+			              break;
+									else 
 #endif
-				          ((struct SEGMENTED_VALUE *)VCost)->v=o->S;
-									((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
-	                o->T=0;
-	                o->S=2/*INT_SIZE*/;
-	                o->V=0;
+										{
+										lVCost->v=o->S;
+										lVCost->seg=SEG_UNDEFINED;
+										o->T=VAR_NUMBER;
+										o->S=2/*INT_SIZE*/;
+										o->V=0;
+										}
 	                break;
 
 	              case 'l':		// length
@@ -312,15 +413,15 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 	                if(*(TS+1) == 'e') {			// length
 										if(o->T & (VAR_STRUCT | VAR_UNION | VAR_RECORD)) {
 											// gestire array... fatti con DUP v. masm
-											((struct SEGMENTED_VALUE *)VCost)->v=o->S;
+											lVCost->v=o->S;
 											}
 										else {
-											((struct SEGMENTED_VALUE *)VCost)->v=o->S;
+											lVCost->v=o->S;
 											}
-										((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
+										lVCost->seg=SEG_UNDEFINED;
 		                o->S=2/*INT_SIZE*/;
 		                }
-		              else {
+		              else {										// low
 										switch(o->V) {
 											case VQ_VAR:
 		                    l=FNGetASCII((const char*)VCost);
@@ -331,16 +432,16 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 												goto fine;
 												break;
 											default:
-												if(((struct SEGMENTED_VALUE *)VCost)->seg)          // no operatori su segmentati (extrn, label)
+											if(lVCost->seg != SEG_NONE && lVCost->seg != SEG_UNDEFINED)          // no operatori su segmentati (extrn, label)
 													PROCError(2062);
   											l=*(NUM_TYPE *)VCost;  
 												break;
 											}
-					          ((struct SEGMENTED_VALUE *)VCost)->v=LOBYTE(LOWORD(l));  
-										((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
+					          lVCost->v=LOBYTE(LOWORD(l));  
+										lVCost->seg=SEG_UNDEFINED;
 		                o->S=1;
 		                }  
-	                o->T=0;
+	                o->T=VAR_NUMBER;
 	                o->V=0;
 	                break;
 
@@ -348,10 +449,10 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 									PROCError(1007);
 									break;
 
-	              case 'h':
+	              case 'h':							// high
 	                v=FNRev(2,o,VCost);
-							if(v<0)
-								return -1;
+									if(v<0)
+										return -1;
 									switch(o->V) {
 										case VQ_VAR:
 		                  l=FNGetASCII((const char*)VCost);
@@ -362,15 +463,15 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 											goto fine;
 											break;
 										default:
-											if(((struct SEGMENTED_VALUE *)VCost)->seg)          // no operatori su segmentati (extrn, label)
+											if(lVCost->seg != SEG_NONE && lVCost->seg != SEG_UNDEFINED)          // no operatori su segmentati (extrn, label)
 												PROCError(2062);
   										l=*(NUM_TYPE *)VCost;  
 											break;
 										}
-				          ((struct SEGMENTED_VALUE *)VCost)->v=HIBYTE(LOWORD(l));  
-									((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
+				          lVCost->v=HIBYTE(LOWORD(l));  
+									lVCost->seg=SEG_UNDEFINED;
 	                o->S=1;
-	                o->T=0;
+	                o->T=VAR_NUMBER;
 	                o->V=0;
 	                break;
 
@@ -387,6 +488,8 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 		              break;
 		            case 'p':			// PTR
 		              break;
+//		            case 's':			// SHORT
+//		              break;
 		            case 'o':			// OFFSET
 	                v=FNRev(2,o,VCost);
 							if(v<0)
@@ -395,19 +498,17 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 										case VQ_OP_VAR:
 		  						    l=*(NUM_TYPE *)VCost;  
 											break;
-										case VQ_VAR:		// serve davvero qua??
-		                  l=FNGetASCII((const char*)VCost);
-											break;
+										case VQ_VAR:
 										default:
 											PROCError(2062);
 											break;
 										}
-				          ((struct SEGMENTED_VALUE *)VCost)->v=LOWORD(l);
-									((struct SEGMENTED_VALUE *)VCost)->seg=SEG_UNDEFINED;
+				          lVCost->v=LOWORD(l);
+									lVCost->seg=SEG_UNDEFINED;
 //									if(CPULevel<3)
 										o->S=PTR_SIZE;
-	                o->T=0;
-	                o->V=0;
+	                o->T=VAR_NUMBER;
+									o->V=VQ_OP_VAR;		// serve a indicare che è una costante, 2025, non so se interessa
 		              break;
 #endif
 		            case 'm':			// MASK
@@ -430,13 +531,13 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 												o->l.v >>= 1;
 												o->l.v |= l;
 												}
-						          ((struct SEGMENTED_VALUE *)VCost)->v=o->l.v;
-											((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;
+						          lVCost->v=o->l.v;
+											lVCost->seg=SEG_NONE;
 											}
 										else {
 											if(!CPass) {			// forward declaration...
-							          ((struct SEGMENTED_VALUE *)VCost)->v=0;
-												((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;
+							          lVCost->v=0;
+												lVCost->seg=SEG_NONE;
 												}
 											else
 												PROCError(2065,TS);
@@ -460,13 +561,13 @@ int FNRev(uint8_t Pty,struct OPERAND *o, void *VCost) {		// restituisce 0 se esp
 											o->l.valid=TRUE;
 											o->l.v=myT->size;
 											o->l.seg=SEG_NONE;
-						          ((struct SEGMENTED_VALUE *)VCost)->v=o->l.v;
-											((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;
+						          lVCost->v=o->l.v;
+											lVCost->seg=SEG_NONE;
 											}
 										else {
 											if(!CPass) {			// forward declaration...
-							          ((struct SEGMENTED_VALUE *)VCost)->v=0;
-												((struct SEGMENTED_VALUE *)VCost)->seg=SEG_NONE;
+							          lVCost->v=0;
+												lVCost->seg=SEG_NONE;
 												}
 											else
 												PROCError(2065,TS);
@@ -580,31 +681,283 @@ shift_left:
 	                break;
 #if I8086
 	              case ':':
-									l=(l << 16) | l2;
+									if(CPULevel<3)
+										l=(l << 16) | l2;
+									else
+										l=(l << 16) | l2;			// forse << 32 o verificare
 	                break;
 #endif
 	              }
 							{
-							struct SEGMENTED_VALUE *ll=(struct SEGMENTED_VALUE *)VCost;
-	            ll->v=l;
-	            ll->valid=TRUE;
-	            ll->seg=SEG_UNDEFINED;
+	            lVCost->v=l;
+	            lVCost->valid=TRUE;
+	            lVCost->seg=SEG_UNDEFINED;
+							lVCost->t=0;
 //	            sprintf(VCost,"%lu",l);
-	            o->S=FNGetSize(*ll);
+	            o->S=FNGetSize(*lVCost);
 							}
-	            o->T=0;
+	            o->T=VAR_NUMBER;
 	            o->V=0;
 //	          fprintf(stderr,"...ritorna %ld, %ld\n",*(long *)VCost,l - l2);
               break;
 
-            case 11:
-            case 12:
+            case 11:		// &&
+							{
+							lVCost->seg=SEG_UNDEFINED;
+							switch(o->V) {
+								case VQ_VAR:
+		              l=FNGetASCII((const char*)VCost);
+									break;
+								case VQ_OP_VAR:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								default:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								}
+							if(!*FNLA(RCost)) {
+								if(Co>0) {
+				          theLinePtr=p2;
+									goto fine;
+									}
+								}
+
+	            v=FNRev(o->op-1,&R,RCost);
+							if(v<0)
+								return -1;
+							switch(R.V) {
+								case VQ_VAR:
+  								l2=FNGetASCII(RCost);
+									break;
+								case VQ_REGISTER:
+									theLinePtr=p2;
+                  if(Co>0) 
+										goto fine;
+									else
+										return -2;
+									break;
+								default:
+									l2=*(NUM_TYPE *)RCost;  
+									break;
+								}
+							if(o->T & VAR_STRING || R.T & VAR_STRING)
+								PROCError(2115);
+							lVCost->v = (l && l2) ? 1 : 0;
+							lVCost->valid=TRUE;
+							lVCost->t=0;
+							o->V=0;
+							o->T=VAR_NUMBER;
+							o->S=1;
+							}
+		          break;
+
+            case 12:		// ||
+							{
+							lVCost->seg=SEG_UNDEFINED;
+							switch(o->V) {
+								case VQ_VAR:
+		              l=FNGetASCII((const char*)VCost);
+									break;
+								case VQ_OP_VAR:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								default:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								}
+							if(!*FNLA(RCost)) {
+								if(Co>0) {
+				          theLinePtr=p2;
+									goto fine;
+									}
+								}
+
+	            v=FNRev(o->op-1,&R,RCost);
+							if(v<0)
+								return -1;
+							switch(R.V) {
+								case VQ_VAR:
+  								l2=FNGetASCII(RCost);
+									break;
+								case VQ_REGISTER:
+									theLinePtr=p2;
+                  if(Co>0) 
+										goto fine;
+									else
+										return -2;
+									break;
+								default:
+									l2=*(NUM_TYPE *)RCost;  
+									break;
+								}
+							if(o->T & VAR_STRING || R.T & VAR_STRING)
+								PROCError(2115);
+							lVCost->v = (l || l2) ? 1 : 0;
+							lVCost->valid=TRUE;
+							lVCost->t=0;
+							o->V=0;
+							o->T=VAR_NUMBER;
+							o->S=1;
+							}
+		          break;
+
             case 13:
 		          break;
 
-            case 14:		// =, lo lascio come delimitatore (in quei casi dove si può inizializzare al volo, v. RECORD
-		          theLinePtr=p2;
-							Exit=TRUE;
+            case 14:		// 
+							{
+							lVCost->seg=SEG_UNDEFINED;
+							switch(o->V) {
+								case VQ_VAR:
+		              l=FNGetASCII((const char*)VCost);
+//									o->T=VAR_STRING;
+									break;
+								case VQ_OP_VAR:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								case VQ_REGISTER:
+									PROCError(2115);
+									break;
+								default:
+  						    l=*(NUM_TYPE *)VCost;  
+									break;
+								}
+							if(!*FNLA(RCost)) {
+								if(Co>0) {
+				          theLinePtr=p2;
+									goto fine;
+									}
+								}
+
+	            v=FNRev(o->op-1,&R,RCost);
+							if(v<0)
+								return -1;
+							switch(R.V) {
+								case VQ_VAR:
+  								l2=FNGetASCII((const char*)RCost);
+//									R.T=VAR_STRING;
+									break;
+								case VQ_OP_VAR:
+  						    l2=*(NUM_TYPE *)RCost;  
+									break;
+								case VQ_REGISTER:
+									PROCError(2115);
+									break;
+								default:
+									l2=*(NUM_TYPE *)RCost;  
+									break;
+								}
+							if(o->T & VAR_STRING && !(R.T & VAR_STRING)) {			// casto... masm fa così
+								l=atoi((char*)l);
+								o->T=VAR_NUMBER;
+								}
+							if(!(o->T & VAR_STRING) && R.T & VAR_STRING) {
+								l2=atoi((char*)l2);
+								R.T=VAR_NUMBER;
+								}
+
+							o->V=0;
+	            switch(tolower(*TS)) {
+								//GESTIRE EQ NE GT LT LE GE ... stringhe... masm; e anche INSTR https://learn.microsoft.com/en-us/cpp/assembler/masm/instr?view=msvc-170
+								case '<':
+									if(tolower(TS[1]) == '=')		// 
+										goto lower_equal;
+lower_than:
+									if(o->T & VAR_STRING) {
+										lVCost->v = stricmp((char*)l,(char*)l2) < 0 ? 1 : 0;
+										}
+									else {
+										lVCost->v=l < l2 ? 1 : 0;
+										}
+									lVCost->valid=TRUE;
+									lVCost->t=0;
+									o->S=1;
+									break;
+								case '>':
+									if(tolower(TS[1]) == '=')		// 
+										goto greater_equal;
+greater_than:
+									if(o->T & VAR_STRING) {
+										lVCost->v = stricmp((char*)l,(char*)l2) > 0 ? 1 : 0;
+										}
+									else {
+										lVCost->v = l > l2 ? 1 : 0;
+										}
+									lVCost->valid=TRUE;
+									lVCost->t=0;
+									o->S=1;
+									break;
+								case 'g':
+									if(tolower(TS[1]) == 't')		// 
+										goto greater_than;
+greater_equal:
+									if(o->T & VAR_STRING) {
+										lVCost->v = stricmp((char*)l,(char*)l2) >= 0 ? 1 : 0;
+										}
+									else {
+										lVCost->v = l > l2 ? 1 : 0;
+										}
+									lVCost->valid=TRUE;
+									lVCost->t=0;
+									o->S=1;
+									break;
+								case 'i':			// instr
+									if(o->T & VAR_STRING) {
+										lVCost->v = stristr((char*)l,(char*)l2) >= 0 ? 1 : 0;
+										}
+									else
+										PROCError(2115);
+									break;
+								case 'l':
+									if(tolower(TS[1]) == 't')		// 
+										goto lower_than;
+lower_equal:
+									if(o->T & VAR_STRING) {
+										lVCost->v = stricmp((char*)l,(char*)l2) <= 0 ? 1 : 0;
+										}
+									else {
+										lVCost->v = l <= l2 ? 1 : 0;
+										}
+									lVCost->valid=TRUE;
+									lVCost->t=0;
+									o->S=1;
+									break;
+								case 'n':
+								case '!':
+									if(o->T & VAR_STRING) {
+										lVCost->v = stricmp((char*)l,(char*)l2) ? 1 : 0;
+										}
+									else {
+										lVCost->v = l != l2 ? 1 : 0;
+										}
+									lVCost->valid=TRUE;
+									lVCost->t=0;
+									o->S=1;
+									break;
+								case 'e':
+									goto is_equal;
+									break;
+								case '=':
+									if(tolower(TS[1]) == '=')	{
+is_equal:
+										if(o->T & VAR_STRING) {
+											lVCost->v = stricmp((char*)l,(char*)l2) ? 0 : 1;
+											}
+										else {
+											lVCost->v = l == l2 ? 1 : 0;
+											}
+										lVCost->valid=TRUE;
+										lVCost->t=0;
+										o->S=1;
+										}
+									else {
+										theLinePtr=p2;
+										Exit=TRUE;
+										}
+									break;
+								}
+							o->T=VAR_NUMBER;
+							}
 		          break;
 
 		        case 15:
@@ -626,4 +979,66 @@ fine:
 	return 0;
   }  
   
+struct SEGMENTED_VALUE FNEvalString(const char *str,const struct LINE_DEF *M,void *C,char parms[10][32],uint8_t parmCnt) {
+	struct OPERAND o;
+	struct VARS *v;
+	struct SEGMENTED_VALUE l[2];
+	char TS[256],T1S[256],oper[16];
+	char *p;
+	uint8_t found=0;
+	int i;
+
+
+	char oldLine[1024];
+	uint16_t oldLinePtr;
+	struct SEGMENTED_VALUE ll;
+
+	strcpy(oldLine,theLine);
+	oldLinePtr=theLinePtr;
+	strcpy(theLine,str);
+	theLinePtr=0;
+	ll=FNEvalExpr(14,TS);
+	strcpy(theLine,oldLine);
+	theLinePtr=oldLinePtr;
+
+	return ll;
+
+
+
+	do {
+		if(str=parse_parm(str,TS,FALSE)) {
+			if(FNSubstituteVars(M,TS,TS,parms,parmCnt)) {
+				}
+			if(v=FNCercaVar(TS,0,0,FALSE,CPass)) {
+				found++;
+				}
+			else if(i=FNIsOp(TS,14)) {
+				strcpy(oper,TS);
+
+				}
+			else if(isdigit(*TS)) {
+				found++;
+				}
+		
+			}
+
+		} while(str && found<2);
+/*	if(found<2 || *str)
+		PROCError(2060);
+
+	switch(FNIsOp(oper,14)) {
+
+
+		}
+*/
+	o.l=*(struct SEGMENTED_VALUE *)C;
+	*(uint64_t*)C=0;
+
+
+	o.l.v=1;
+	// FARE!!!
+
+	o.l.valid=1;
+	return o.l;
+  }  
   

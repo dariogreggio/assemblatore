@@ -16,7 +16,7 @@ struct SUB_CODE sMn3[] = {
   };
   
 struct SUB_CODE sMn4[] = {
-  ADDR_BIT,0xcb40,8, ADDR_BIT2,0xcb46,12, ADDR_BITXY,0xddcb46,20, 0,0,0
+  ADDR_BIT,0xcb40,8, ADDR_BIT2,0xcb46,12, ADDR_BITX,0xddcb46,20, ADDR_BITY,0xfdcb46,23, 0,0,0
   };
   
 struct SUB_CODE sMn5[] = {
@@ -183,7 +183,7 @@ struct SUB_CODE sMn44[] = {
   };
   
 struct SUB_CODE sMn45[] = {
-  ADDR_BIT,0xcb80,8, ADDR_BIT2,0xcb86,15, ADDR_BITXY,0xddcb86,23, 0,0,0
+  ADDR_BIT,0xcb80,8, ADDR_BIT2,0xcb86,15, ADDR_BITX,0xddcb86,23, ADDR_BITY,0xfdcb86,23, 0,0,0
   };
   
 struct SUB_CODE sMn46[] = {
@@ -251,7 +251,7 @@ struct SUB_CODE sMn61[] = {
   };
   
 struct SUB_CODE sMn62[] = {
-  ADDR_BIT,0xcbc0,8, ADDR_BIT2,0xcbc6,15, ADDR_BITXY,0xddcbc6,23, ADDR_53,0xfdcbc6,23, 0,0,0
+  ADDR_BIT,0xcbc0,8, ADDR_BIT2,0xcbc6,15, ADDR_BITX,0xddcbc6,23, ADDR_BITY,0xfdcbc6,23, 0,0,0
   };
   
 struct SUB_CODE sMn63[] = {
@@ -2335,7 +2335,8 @@ struct SUB_CODE sMn25[] = {
   };
   
 struct SUB_CODE sMn26[] = {
-  ADDR_IMM8/*serve cmq!*/,0x00E8,4, ADDR_IMM16,0x00E8,4, ADDR_IMM32,0x009A,6, ADDR_REG16,0xD0FF,8, 0,0,0
+  ADDR_IMM8/*serve cmq!*/,0x00E8,4, ADDR_IMM16,0x00E8,4, ADDR_IMM32,0x009A,6, ADDR_REG16,0xD0FF,8,
+	ADDR_IND16_REG16,0xFF10,0, ADDR_IND16REG_REG16,0xFF10,0, 
   };
   
 struct SUB_CODE sMn27[] = {
@@ -2768,16 +2769,20 @@ struct SUB_CODE sMn132[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
   
-struct SUB_CODE sMn133[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+struct SUB_CODE sMn133[] = {			// verificare FNSTCW WORD PTR [BX]		
+	ADDR_IND16_REG16,0xD93F,0,  ADDR_IND16REG_REG16,0xD93F,0, 
+	ADDR_REG16_IND16,0xD93F,0, 	ADDR_REG16_IND16REG,0xD93F,0, 
+	ADDR_IND16REG_IMM16,0xD93F,0, ADDR_REG16_IND16REG,0xD93F,0,  0,0,0
   };
   
 struct SUB_CODE sMn134[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
   
-struct SUB_CODE sMn135[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+struct SUB_CODE sMn135[] = {			// VERIFICARE! DD 3F è per FNSTSW WORD PTR [bx]	 da glabios
+	ADDR_IND16_REG16,0xDD3F,0,  ADDR_IND16REG_REG16,0xDD3F,0, 
+	ADDR_REG16_IND16,0xDD3F,0, 	ADDR_REG16_IND16REG,0xDD3F,0, 
+	ADDR_IND16REG_IMM16,0xDD3F,0, ADDR_REG16_IND16REG,0xDD3F,0,  0,0,0
   };
   
 struct SUB_CODE sMn136[] = {
@@ -2974,7 +2979,7 @@ struct SUB_CODE sMn182[] = {
   };
 
 struct SUB_CODE sMn183[] = {
-  ADDR_IMPL,0x00CD,4,  0,0,0
+  ADDR_IMM8,0x00CD,4,  0,0,0
   };
 
 struct SUB_CODE sMn184[] = {
@@ -3002,15 +3007,17 @@ struct SUB_CODE sMn189[] = {
   };
 
 struct SUB_CODE sMn190[] = {
-  ADDR_IMM8,0x0070,0, ADDR_IMM16,0x0070,0, 0,0,0
+  ADDR_IMM8,0x0070,0, ADDR_IMM16,0x0070,0, ADDR_IMM32,0x0070,0, 0,0,0
   };
 
 struct SUB_CODE sMn191[] = {
-  ADDR_IMM8,0x00E3,2, ADDR_IMM16,0x00E3,4, 0,0,0
+  ADDR_IMM8,0x00E3,2, ADDR_IMM16,0x00E3,4, ADDR_IMM32,0x00E3,4, 0,0,0
   };
 
 struct SUB_CODE sMn192[] = {
-  ADDR_IMM8,0x00EB,2, ADDR_IMM16,0x00E9,4, ADDR_IMM32,0x00EA,6, ADDR_REG16,0xE0FF,8, 0,0,0
+  ADDR_IMM8,0x00EB,2, ADDR_IMM16,0x00E9,4, ADDR_IMM32,0x00EA,6, ADDR_REG16,0xE0FF,8,
+	ADDR_IND16_REG16,0xFF20,0, ADDR_IND16REG_REG16,0xFF20,0, 
+	0,0,0
   };
 
 struct SUB_CODE sMn193[] = {
@@ -3077,24 +3084,29 @@ struct SUB_CODE sMn208[] = {
   ADDR_IMPL,0x00F0,4,  0,0,0
   };
   
-struct SUB_CODE sMn209[] = {
-  ADDR_IMPL,0x00AC,4, 0,0,0
+struct SUB_CODE sMn209[] = {			// gestire in base a size
+  ADDR_IMPL,0x00AC,0,
+  ADDR_IND16REG_REG8,0x00AC,0, ADDR_IND16REG_REG16,0x00AD,0,
+	0,0,0
   };
   
 struct SUB_CODE sMn210[] = {
-  ADDR_IMPL,0x00AC,4, 0,0,0			// gestire in base a size
+  ADDR_IMPL,0x00AC,0,
+  ADDR_IND16REG_REG8,0x00AC,0, 0,0,0
   };
   
 struct SUB_CODE sMn211[] = {
-  ADDR_IMPL,0x00AD,4, 0,0,0
+  ADDR_IMPL,0x00AD,0,
+  ADDR_IND16REG_REG16,0x00AD,0, 0,0,0
   };
   
 struct SUB_CODE sMn212[] = {
-  ADDR_IMPL,0x00AD,4, 0,0,0
+  ADDR_IMPL,0x00AD,0,
+  ADDR_IND16REG_REG16,0x00AD,0, 0,0,0
   };
   
 struct SUB_CODE sMn213[] = {
-  ADDR_IMM8,0x00E2,0, ADDR_IMM16,0x00E2,0, 0,0,0
+  ADDR_IMM8,0x00E2,0, ADDR_IMM16,0x00E2,0, ADDR_IMM32,0x00E2,0, 0,0,0
   };
   
 struct SUB_CODE sMn214[] = {
@@ -3325,7 +3337,8 @@ struct SUB_CODE sMn268[] = {
   };
   
 struct SUB_CODE sMn269[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_REG8,0xF600,4, ADDR_REG16,0xF700,4,
+	ADDR_IND16REG_REG8,0xF608,0, ADDR_IND16REG_REG16,0xF708,0,  0,0,0
   };
 
 struct SUB_CODE sMn270[] = {
@@ -3333,7 +3346,8 @@ struct SUB_CODE sMn270[] = {
   };
 
 struct SUB_CODE sMn271[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_REG8,0xF6D0,4, ADDR_REG16,0xF7D0,4,
+	ADDR_IND16REG_REG8,0xF610,0, ADDR_IND16REG_REG16,0xF710,0,  0,0,0
   };
 
 struct SUB_CODE sMn272[] = {
@@ -3678,7 +3692,7 @@ struct SUB_CODE sMn354[] = {
   };
   
 struct SUB_CODE sMn355[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_IMPL,0x009C,4,  0,0,0
   };
   
 struct SUB_CODE sMn356[] = {
@@ -3742,63 +3756,69 @@ struct SUB_CODE sMn369[] = {
   };
   
 struct SUB_CODE sMn370[] = {
-  ADDR_IMPL,0x00C3,4, ADDR_IMPL,0x00CB/*far*/,4, ADDR_IMM16,0x00C2,4, ADDR_IMM16,0x00CA/*far*/,4, 0,0,0
+  ADDR_IMPL,0x00C3,4, ADDR_IMPL,0x00CB/*far*/,4, 
+	ADDR_IMM8,0x00C2,4, ADDR_IMM8,0x00CA/*far*/,4, 
+	ADDR_IMM16,0x00C2,4, ADDR_IMM16,0x00CA/*far*/,4, 0,0,0
   };
 
 struct SUB_CODE sMn371[] = {
+  ADDR_IMPL,0x00CB/*far*/,4, 
+	ADDR_IMM8,0x00CA/*far*/,4, 
+	ADDR_IMM16,0x00CA/*far*/,4, 0,0,0
+  };
+
+struct SUB_CODE sMn372[] = {
+  ADDR_IMPL,0x00C3,4, 
+	ADDR_IMM8,0x00C2,4, 
+	ADDR_IMM16,0x00C2,4, 0,0,0
+  };
+
+struct SUB_CODE sMn373[] = {
   ADDR_REG8IMM,0xD0C0,2, ADDR_REG16IMM,0xD1C0,4, ADDR_REG8REG,0xD2C0,2, ADDR_REG16REG,0xD3C0,4,
 	ADDR_IND16REG_IMM8,0xD000,2, ADDR_IND16REG_IMM16,0xD200,0,
 	ADDR_IND16_REG8,0xD000,2, ADDR_IND16_REG16,0xD200,0, ADDR_IND16REG_REG8,0xD000,2, ADDR_IND16REG_REG16,0xD200,0, 0,0,0
   };
   
-struct SUB_CODE sMn372[] = {
+struct SUB_CODE sMn374[] = {
   ADDR_REG8IMM,0xD0C8,2, ADDR_REG16IMM,0xD1C8,4, ADDR_REG8REG,0xD2C8,2, ADDR_REG16REG,0xD3C8,4,
 	ADDR_IND16REG_IMM8,0xD008,2, ADDR_IND16REG_IMM16,0xD208,0,
 	ADDR_IND16_REG8,0xD008,2, ADDR_IND16_REG16,0xD208,0, ADDR_IND16REG_REG8,0xD008,2, ADDR_IND16REG_REG16,0xD208,0, 0,0,0
   };
   
-struct SUB_CODE sMn373[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
-  };
-
-struct SUB_CODE sMn374[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
-  };
-
 struct SUB_CODE sMn375[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn376[] = {
-  ADDR_IMPL,0x009E,2,  0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn377[] = {
+  ADDR_IMPL,0xffff,4,  0,0,0
+  };
+
+struct SUB_CODE sMn378[] = {
+  ADDR_IMPL,0x009E,2,  0,0,0
+  };
+
+struct SUB_CODE sMn379[] = {
   ADDR_REG8IMM,0xD0E0,2, ADDR_REG16IMM,0xD1E0,4, ADDR_REG8REG,0xD2E0,2, ADDR_REG16REG,0xD3E0,4,
 	ADDR_IND16REG_IMM8,0xD020,2, ADDR_IND16REG_IMM16,0xD220,0,
 	ADDR_IND16_REG8,0xD020,2, ADDR_IND16_REG16,0xD220,0, ADDR_IND16REG_REG8,0xD020,2, ADDR_IND16REG_REG16,0xD220,0, 0,0,0
   };
 
-struct SUB_CODE sMn378[] = {
+struct SUB_CODE sMn380[] = {
   ADDR_REG8IMM,0xD0F8,2, ADDR_REG16IMM,0xD1F8,4, ADDR_REG8REG,0xD2F8,2, ADDR_REG16REG,0xD3F8,4,
 	ADDR_IND16REG_IMM8,0xD038,2, ADDR_IND16REG_IMM16,0xD238,0,
 	ADDR_IND16_REG8,0xD038,2, ADDR_IND16_REG16,0xD238,0, ADDR_IND16REG_REG8,0xD038,2, ADDR_IND16REG_REG16,0xD238,0, 0,0,0
   };
 
-struct SUB_CODE sMn379[] = {
+struct SUB_CODE sMn381[] = {
   ADDR_REG8,0x001C,2, ADDR_REG16,0x001D,4, ADDR_REG8IMM,0x80D8,2, ADDR_REG16IMM,0x81D8,4, ADDR_REG8REG,0x0018,2, ADDR_REG16REG,0x0019,4,
 	ADDR_IND16_REG8,0x0018,0, ADDR_IND16_REG16,0x0019,0,  ADDR_IND16REG_REG8,0x0018,0, ADDR_IND16REG_REG16,0x0019,0, 
 	ADDR_REG8_IND16,0x001A,0, ADDR_REG16_IND16,0x001B,0, 	ADDR_REG8_IND16REG,0x001A,0, ADDR_REG16_IND16REG,0x001B,0, 
 	ADDR_IND16REG_IMM8,0x8018,0, ADDR_IND16REG_IMM16,0x8118,0, 
 	ADDR_IND16REG_IMM16_8,0x8318,0, 0,0,0
-  };
-
-struct SUB_CODE sMn380[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
-  };
-
-struct SUB_CODE sMn381[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn382[] = {
@@ -3822,9 +3842,7 @@ struct SUB_CODE sMn386[] = {
   };
 
 struct SUB_CODE sMn387[] = {
-  ADDR_REG8IMM,0xD0F0,2, ADDR_REG16IMM,0xD1F0,4, ADDR_REG8REG,0xD2F0,2, ADDR_REG16REG,0xD3F0,4,
-	ADDR_IND16REG_IMM8,0xD030,2, ADDR_IND16REG_IMM16,0xD230,0,
-	ADDR_IND16_REG8,0xD030,2, ADDR_IND16_REG16,0xD230,0, ADDR_IND16REG_REG8,0xD030,2, ADDR_IND16REG_REG16,0xD230,0, 0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn388[] = {
@@ -3832,9 +3850,9 @@ struct SUB_CODE sMn388[] = {
   };
 
 struct SUB_CODE sMn389[] = {
-  ADDR_REG8IMM,0xD0E8,2, ADDR_REG16IMM,0xD1E8,4, ADDR_REG8REG,0xD2E8,2, ADDR_REG16REG,0xD3E8,4,
-	ADDR_IND16REG_IMM8,0xD028,2, ADDR_IND16REG_IMM16,0xD228,0,
-	ADDR_IND16_REG8,0xD028,2, ADDR_IND16_REG16,0xD228,0, ADDR_IND16REG_REG8,0xD028,2, ADDR_IND16REG_REG16,0xD228,0, 0,0,0
+  ADDR_REG8IMM,0xD0F0,2, ADDR_REG16IMM,0xD1F0,4, ADDR_REG8REG,0xD2F0,2, ADDR_REG16REG,0xD3F0,4,
+	ADDR_IND16REG_IMM8,0xD030,2, ADDR_IND16REG_IMM16,0xD230,0,
+	ADDR_IND16_REG8,0xD030,2, ADDR_IND16_REG16,0xD230,0, ADDR_IND16REG_REG8,0xD030,2, ADDR_IND16REG_REG16,0xD230,0, 0,0,0
   };
 
 struct SUB_CODE sMn390[] = {
@@ -3842,7 +3860,9 @@ struct SUB_CODE sMn390[] = {
   };
 
 struct SUB_CODE sMn391[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_REG8IMM,0xD0E8,2, ADDR_REG16IMM,0xD1E8,4, ADDR_REG8REG,0xD2E8,2, ADDR_REG16REG,0xD3E8,4,
+	ADDR_IND16REG_IMM8,0xD028,2, ADDR_IND16REG_IMM16,0xD228,0,
+	ADDR_IND16_REG8,0xD028,2, ADDR_IND16_REG16,0xD228,0, ADDR_IND16REG_REG8,0xD028,2, ADDR_IND16REG_REG16,0xD228,0, 0,0,0
   };
 
 struct SUB_CODE sMn392[] = {
@@ -3878,47 +3898,47 @@ struct SUB_CODE sMn399[] = {
   };
 
 struct SUB_CODE sMn400[] = {
-  ADDR_IMPL,0x00f9,4, 0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn401[] = {
-  ADDR_IMPL,0x00fd,4, 0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
 
 struct SUB_CODE sMn402[] = {
-  ADDR_IMPL,0x00fb,4, 0,0,0
+  ADDR_IMPL,0x00f9,4, 0,0,0
   };
 
 struct SUB_CODE sMn403[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_IMPL,0x00fd,4, 0,0,0
   };
 
 struct SUB_CODE sMn404[] = {
-  ADDR_IMPL,0x00ac,4, 0,0,0			// gestire in base a size
+  ADDR_IMPL,0x00fb,4, 0,0,0
   };
-  
+
 struct SUB_CODE sMn405[] = {
-  ADDR_IMPL,0x00ac,4, 0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
-  
+
 struct SUB_CODE sMn406[] = {
-  ADDR_IMPL,0x00ad,4, 0,0,0
+	ADDR_IMPL,0x00AA,0, 
+  ADDR_IND16REG_REG8,0x00AA,0, ADDR_IND16REG_REG16,0x00AB,0,  0,0,0			// gestire in base a size
   };
   
 struct SUB_CODE sMn407[] = {
-  ADDR_IMPL,0x00ad,4, 0,0,0
+	ADDR_IMPL,0x00AA,0, 
+  ADDR_IND16REG_REG8,0x00AA,0, 0,0,0
   };
   
 struct SUB_CODE sMn408[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+	ADDR_IMPL,0x00AB,0, 
+  ADDR_IND16REG_REG16,0x00AB,0,  0,0,0	
   };
   
 struct SUB_CODE sMn409[] = {
-  ADDR_REG8,0x002C,2, ADDR_REG16,0x002D,4, ADDR_REG8IMM,0x80E8,2, ADDR_REG16IMM,0x81E8,4, ADDR_REG8REG,0x0028,2, ADDR_REG16REG,0x0029,4,
-	ADDR_IND16_REG8,0x0028,0, ADDR_IND16_REG16,0x0029,0,  ADDR_IND16REG_REG8,0x0028,0, ADDR_IND16REG_REG16,0x0029,0, 
-	ADDR_REG8_IND16,0x002A,0, ADDR_REG16_IND16,0x002B,0, 	ADDR_REG8_IND16REG,0x002A,0, ADDR_REG16_IND16REG,0x002B,0, 
-	ADDR_IND16REG_IMM8,0x8028,0, ADDR_IND16REG_IMM16,0x8128,0, 
-	ADDR_IND16REG_IMM16_8,0x8328,0, 0,0,0
+	ADDR_IMPL,0x00AB,0, 
+  ADDR_IND16REG_REG16,0x00AB,0,  0,0,0	
   };
   
 struct SUB_CODE sMn410[] = {
@@ -3926,7 +3946,11 @@ struct SUB_CODE sMn410[] = {
   };
   
 struct SUB_CODE sMn411[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_REG8,0x002C,2, ADDR_REG16,0x002D,4, ADDR_REG8IMM,0x80E8,2, ADDR_REG16IMM,0x81E8,4, ADDR_REG8REG,0x0028,2, ADDR_REG16REG,0x0029,4,
+	ADDR_IND16_REG8,0x0028,0, ADDR_IND16_REG16,0x0029,0,  ADDR_IND16REG_REG8,0x0028,0, ADDR_IND16REG_REG16,0x0029,0, 
+	ADDR_REG8_IND16,0x002A,0, ADDR_REG16_IND16,0x002B,0, 	ADDR_REG8_IND16REG,0x002A,0, ADDR_REG16_IND16REG,0x002B,0, 
+	ADDR_IND16REG_IMM8,0x8028,0, ADDR_IND16REG_IMM16,0x8128,0, 
+	ADDR_IND16REG_IMM16_8,0x8328,0, 0,0,0
   };
   
 struct SUB_CODE sMn412[] = {
@@ -3946,9 +3970,7 @@ struct SUB_CODE sMn415[] = {
   };
   
 struct SUB_CODE sMn416[] = {
-  ADDR_REG8,0x00A8,2, ADDR_REG16,0x00A9,4, ADDR_REG8IMM,0x0084,2, ADDR_REG16IMM,0x0085,4, ADDR_REG8REG,0x0010,2, ADDR_REG16REG,0x0011,4,
-	ADDR_IND16REG_IMM8,0xF600,0, ADDR_IND16REG_IMM16,0xF700,0, 
-	0,0,0
+  ADDR_IMPL,0xffff,4,  0,0,0
   };
   
 struct SUB_CODE sMn417[] = {
@@ -3956,7 +3978,9 @@ struct SUB_CODE sMn417[] = {
   };
   
 struct SUB_CODE sMn418[] = {
-  ADDR_IMPL,0xffff,4,  0,0,0
+  ADDR_REG8,0x00A8,2, ADDR_REG16,0x00A9,4, ADDR_REG8IMM,0x00A8,2, ADDR_REG16IMM,0x00A9,4, ADDR_REG8REG,0x0010,2, ADDR_REG16REG,0x0011,4,
+	ADDR_IND16REG_IMM8,0xF600,0, ADDR_IND16REG_IMM16,0xF700,0, ADDR_REG8_IND16REG,0x0084,0, ADDR_REG16_IND16REG,0x0085,0, 
+	0,0,0
   };
   
 struct SUB_CODE sMn419[] = {
@@ -4004,19 +4028,31 @@ struct SUB_CODE sMn429[] = {
   };
   
 struct SUB_CODE sMn430[] = {
-  ADDR_REG16,0x0090,4, 
-	ADDR_IND16REG_REG8,0x0086,0, ADDR_IND16REG_REG16,0x0087,0,  0,0,0
-  };
-  
-struct SUB_CODE sMn431[] = {
-	ADDR_IMPL,0x00D7,0,  ADDR_IND16_REG8/*cmq finto!*/,0x00D7,0, 0,0,0
-  };
-  
-struct SUB_CODE sMn432[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
   
+struct SUB_CODE sMn431[] = {
+  ADDR_IMPL,0xffff,4,  0,0,0
+  };
+  
+struct SUB_CODE sMn432[] = {
+  ADDR_REG8REG,0x0086,4, ADDR_REG16,0x0090,4, ADDR_REG16REG,0x0087,4, 
+	ADDR_REG8_IND16,0x0086,0, ADDR_REG16_IND16,0x0087,0,
+	ADDR_IND16REG_REG8,0x0086,0, ADDR_IND16REG_REG16,0x0087,0,
+	ADDR_REG8_IND16REG,0x0086,0, ADDR_REG16_IND16REG,0x0087,0,  0,0,0 
+  };
+  
 struct SUB_CODE sMn433[] = {
+	ADDR_IMPL,0x00D7,0, // DEBUG accetta anche XLAT da solo, altri no froci@#£$%
+	ADDR_IND16_REG8/*cmq finto!*/,0x00D7,0, ADDR_IND16REG_REG8,0x00D7,0,
+	0,0,0
+  };
+  
+struct SUB_CODE sMn434[] = {
+  ADDR_IMPL,0x00D7,0, 0,0,0
+  };
+  
+struct SUB_CODE sMn435[] = {
   ADDR_REG8,0x0034,2, ADDR_REG16,0x0035,4, ADDR_REG8IMM,0x80F0,2, ADDR_REG16IMM,0x81F0,4, ADDR_REG8REG,0x0030,2, ADDR_REG16REG,0x0031,4,
 	ADDR_IND16_REG8,0x0030,0, ADDR_IND16_REG16,0x0031,0,  ADDR_IND16REG_REG8,0x0030,0, ADDR_IND16REG_REG16,0x0031,0, 
 	ADDR_REG8_IND16,0x0032,0, ADDR_REG16_IND16,0x0033,0, 	ADDR_REG8_IND16REG,0x0032,0, ADDR_REG16_IND16REG,0x0033,0, 
@@ -4024,11 +4060,11 @@ struct SUB_CODE sMn433[] = {
 	ADDR_IND16REG_IMM16_8,0x8330,0, 0,0,0
   };
   
-struct SUB_CODE sMn434[] = {
+struct SUB_CODE sMn436[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
   
-struct SUB_CODE sMn435[] = {
+struct SUB_CODE sMn437[] = {
   ADDR_IMPL,0xffff,4,  0,0,0
   };
   
@@ -4422,219 +4458,221 @@ struct CODE Mnem[] = {
   "REPNZ",sMn368,
   "REPZ",sMn369,
   "RET",sMn370,
-  "ROL",sMn371,
-  "ROR",sMn372,
-  "RSM",sMn373,
-  "RSQRTPS",sMn374,
-  "RSQRTSS",sMn375,
-  "SAHF",sMn376,
-  "SAL",sMn377,
-  "SAR",sMn378,
-  "SBB",sMn379,
-  "SCAS",sMn380,
-  "SCASB",sMn381,
-  "SCASD",sMn382,
-  "SCASW",sMn383,
-  "SET",sMn384,			// SETcc
-  "SFENCE",sMn385,
-  "SGDT",sMn386,
-  "SHL",sMn387,
-  "SHLD",sMn388,
-  "SHR",sMn389,
-  "SHRD",sMn390,
-  "SHUFPD",sMn391,
-  "SHUFPS",sMn392,
-  "SIDT",sMn393,
-  "SLDT",sMn394,
-  "SMSW",sMn395,
-  "SQRTPD",sMn396,
-  "SQRTPS",sMn397,
-  "SQRTSD",sMn398,
-  "SQRTSS",sMn399,
-  "STC",sMn400,
-  "STD",sMn401,
-  "STI",sMn402,
-  "STMXCSR",sMn403,
-  "STOS",sMn404,
-  "STOSB",sMn405,
-  "STOSD",sMn406,
-  "STOSW",sMn407,
-  "STR",sMn408,
-  "SUB",sMn409,
-  "SUBPD",sMn410,
-  "SUBPS",sMn411,
-  "SUBSD",sMn412,
-  "SUBSS",sMn413,
-  "SYSENTER",sMn414,
-  "SYSEXIT",sMn415,
-  "TEST",sMn416,
-  "UCOMISD",sMn417,
-  "UCOMISS",sMn418,
-  "UD2",sMn419,
-  "UNPCKHPD",sMn420,
-  "UNPCKHPS",sMn421,
-  "UNPCKLPD",sMn422,
-  "UNPCKLPS",sMn423,
-  "VERR",sMn424,
-  "VERW",sMn425,
-  "WAIT",sMn426,
-  "WBINVD",sMn427,
-  "WRMSR",sMn428,
-  "XADD",sMn429,
-  "XCHG",sMn430,
-  "XLAT",sMn431,
-  "XLATB",sMn432,
-  "XOR",sMn433,
-  "XORPD",sMn434,
-  "XORPS",sMn435
+  "RETF",sMn371,
+  "RETN",sMn372,
+  "ROL",sMn373,
+  "ROR",sMn374,
+  "RSM",sMn375,
+  "RSQRTPS",sMn376,
+  "RSQRTSS",sMn377,
+  "SAHF",sMn378,
+  "SAL",sMn379,
+  "SAR",sMn380,
+  "SBB",sMn381,
+  "SCAS",sMn382,
+  "SCASB",sMn383,
+  "SCASD",sMn384,
+  "SCASW",sMn385,
+  "SET",sMn386,			// SETcc
+  "SFENCE",sMn387,
+  "SGDT",sMn388,
+  "SHL",sMn389,
+  "SHLD",sMn390,
+  "SHR",sMn391,
+  "SHRD",sMn392,
+  "SHUFPD",sMn393,
+  "SHUFPS",sMn394,
+  "SIDT",sMn395,
+  "SLDT",sMn396,
+  "SMSW",sMn397,
+  "SQRTPD",sMn398,
+  "SQRTPS",sMn399,
+  "SQRTSD",sMn400,
+  "SQRTSS",sMn401,
+  "STC",sMn402,
+  "STD",sMn403,
+  "STI",sMn404,
+  "STMXCSR",sMn405,
+  "STOS",sMn406,
+  "STOSB",sMn407,
+  "STOSD",sMn408,
+  "STOSW",sMn409,
+  "STR",sMn410,
+  "SUB",sMn411,
+  "SUBPD",sMn412,
+  "SUBPS",sMn413,
+  "SUBSD",sMn414,
+  "SUBSS",sMn415,
+  "SYSENTER",sMn416,
+  "SYSEXIT",sMn417,
+  "TEST",sMn418,
+  "UCOMISD",sMn419,
+  "UCOMISS",sMn420,
+  "UD2",sMn421,
+  "UNPCKHPD",sMn422,
+  "UNPCKHPS",sMn423,
+  "UNPCKLPD",sMn424,
+  "UNPCKLPS",sMn425,
+  "VERR",sMn426,
+  "VERW",sMn427,
+  "WAIT",sMn428,
+  "WBINVD",sMn429,
+  "WRMSR",sMn430,
+  "XADD",sMn431,
+  "XCHG",sMn432,
+  "XLAT",sMn433,
+  "XLATB",sMn434,
+  "XOR",sMn435,
+  "XORPD",sMn436,
+  "XORPS",sMn437
   };
 #endif  
   
 
 #if Z80
 struct REGS Reg[] = {
-	"A",7,
-	"B",0,
-	"C",1,
-	"D",2,
-	"E",3,
+	"A",7,0,
+	"B",0,0,
+	"C",1,0,
+	"D",2,0,
+	"E",3,0,
 //	"F",4,
-	"H",4,
-	"L",5,
-	"I",16,
-	"R",17,
-	"AF",3,
-	"BC",0,
-	"DE",1,
-	"HL",2,
-	"IX",16,
-	"IY",17,
-	"SP",0x13,
-	"AF'",0x23,
-  NULL,0
+	"H",4,0,
+	"L",5,0,
+	"I",16,0,
+	"R",17,0,
+	"AF",3,0,
+	"BC",0,0,
+	"DE",1,0,
+	"HL",2,0,
+	"IX",16,0,
+	"IY",17,0,
+	"SP",0x13,0,
+	"AF'",0x23,0,
+  NULL,0,0
   };
 
 #elif I8051
 struct REGS Reg[] = {
-	"A",0,
-	"B",1,
-	"C",2,
-	"R0",0x10,
-	"R1",0x11,
-	"R2",0x12,
-	"R3",0x13,
-	"R4",0x14,
-	"R5",0x15,
-	"R6",0x16,
-	"R7",0x17,
-	"DPTR",0x20,   //11
+	"A",0,0,
+	"B",1,0,
+	"C",2,0,
+	"R0",0x10,0,
+	"R1",0x11,0,
+	"R2",0x12,0,
+	"R3",0x13,0,
+	"R4",0x14,0,
+	"R5",0x15,0,
+	"R6",0x16,0,
+	"R7",0x17,0,
+	"DPTR",0x20,0,   //11
 //	"SP",0x10,
-  NULL,0
+  NULL,0,0
   };
 
 #elif ST62
 struct REGS Reg[] = {
-	"A",0,
-	"X",1,
-	"Y",2,
-	"V",3,
-	"W",4,
-  NULL,0
+	"A",0,0,
+	"X",1,0,
+	"Y",2,0,
+	"V",3,0,
+	"W",4,0,
+  NULL,0,0
   };
 
 #elif _6502
 struct REGS Reg[] = {
-	"A",0,
-	"X",1,
-	"Y",2,
-	"S",3,
-	"P",4,
-  NULL,0
+	"A",0,0,
+	"X",1,0,
+	"Y",2,0,
+	"S",3,0,
+	"P",4,0,
+  NULL,0,0,
   };
 
 #elif PIC==16 || PIC==18
 struct REGS Reg[] = {
-	"W",0,
-  NULL,0
+	"W",0,0,
+  NULL,0,0
   };
 
 #elif GD24032
 struct REGS Reg[] = {
-	"R0",0x10,
-	"R1",0x11,
-	"R2",0x12,
-	"R3",0x13,
-	"R4",0x14,
-	"R5",0x15,
-	"R6",0x16,
-	"R7",0x17,
-	"R8",0x18,
-	"R9",0x19,
-	"R10",0x1a,
-	"R11",0x1b,
-	"R12",0x1c,
-	"R13",0x1d,
-	"R14",0x1e,
-	"R15",0x1f,
-	"R16",0x20,
-	"R17",0x21,
-	"R18",0x22,
-	"R19",0x23,
-	"R20",0x24,
-	"R21",0x25,
-	"R22",0x26,
-	"R23",0x27,
-	"R24",0x28,
-	"R25",0x29,
-	"R26",0x2a,
-	"R27",0x2b,
-	"R28",0x2c,
-	"R29",0x2d,
-	"R30",0x2e,
-	"R31",0x2f,
-	"WP",0,
-	"ST",1,
-  NULL,0
+	"R0",0x10,0,
+	"R1",0x11,0,
+	"R2",0x12,0,
+	"R3",0x13,0,
+	"R4",0x14,0,
+	"R5",0x15,0,
+	"R6",0x16,0,
+	"R7",0x17,0,
+	"R8",0x18,0,
+	"R9",0x19,0,
+	"R10",0x1a,0,
+	"R11",0x1b,0,
+	"R12",0x1c,0,
+	"R13",0x1d,0,
+	"R14",0x1e,0,
+	"R15",0x1f,0,
+	"R16",0x20,0,
+	"R17",0x21,0,
+	"R18",0x22,0,
+	"R19",0x23,0,
+	"R20",0x24,0,
+	"R21",0x25,0,
+	"R22",0x26,0,
+	"R23",0x27,0,
+	"R24",0x28,0,
+	"R25",0x29,0,
+	"R26",0x2a,0,
+	"R27",0x2b,0,
+	"R28",0x2c,0,
+	"R29",0x2d,0,
+	"R30",0x2e,0,
+	"R31",0x2f,0,
+	"WP",0,0,
+	"ST",1,0,
+  NULL,0,0
   };
 
 #elif I8086
 struct REGS Reg[] = {
-	"AL",0,
-	"CL",1,
-	"DL",2,
-	"BL",3,
-	"AH",4,
-	"CH",5,
-	"DH",6,
-	"BH",7,
-	"AX",8,
-	"CX",9,
-	"DX",10,
-	"BX",11,
-	"SP",12,
-	"BP",13,
-	"SI",14,
-	"DI",15,
-	"ES",16,
-	"CS",17,
-	"SS",18,
-	"DS",19,
-	"EAX",32,
-	"ECX",33,
-	"EDX",34,
-	"EBX",35,
-	"ESP",36,
-	"EBP",37,
-	"EDI",38,
-	"ESI",39,
-	"FS",40,
-	"GS",41,
+	"AL",0,0,
+	"CL",1,0,
+	"DL",2,0,
+	"BL",3,0,
+	"AH",4,0,
+	"CH",5,0,
+	"DH",6,0,
+	"BH",7,0,
+	"AX",8,0,			// (bah.. poi è più difficile... RINUMERARE PARTENDO DA 0! come Z80, ci pensa 0x100 in FNIsReg a gestire
+	"CX",9,0,
+	"DX",10,0,
+	"BX",11,0,
+	"SP",12,0,
+	"BP",13,0,
+	"SI",14,0,
+	"DI",15,0,
+	"ES",16,0,
+	"CS",17,0,
+	"SS",18,0,
+	"DS",19,0,
+	"EAX",32,0,
+	"ECX",33,0,
+	"EDX",34,0,
+	"EBX",35,0,
+	"ESP",36,0,
+	"EBP",37,0,
+	"EDI",38,0,
+	"ESI",39,0,
+	"FS",40,0,
+	"GS",41,0,
 //	"F",0x23,
-	"RAX",64,		// per istruzioni coprocessore math e/o mmx?
-	"RCX",65,
-	"RDX",66,
-	"RBX",367,
-  NULL,0
+	"RAX",64,0,		// per istruzioni coprocessore math e/o mmx?
+	"RCX",65,0,
+	"RDX",66,0,
+	"RBX",67,0,
+  NULL,0,0
   };
 
 #endif
@@ -4645,25 +4683,26 @@ struct MY_CODE MCom[] = {
   "DW",2,"DEFW",2,"WORD",2,
   "DD",4,"DEFL",4,
   "DQ",8,
-#ifdef I8086
+#if I8086
   "REAL4",4,
+	"DF",6,
   "REAL8",8,
   "REAL10",10,
 #endif
-#ifndef I8086
+#if I8086==0
   "DS",0x10,			// perché va come Segmento!
 #endif
 	"DEFS",0x10,      // Define Space(n)
   "STRING",0x11,"ASCIIZ",0x11,  // 
   "ASCII",0x12,"DEFM",0x12,   // 
 #if PIC==16 || PIC==18
-  "DT",0x12,"DATA",0x12,
+  "DT",0x12,"DATA",0x12,			// DT su 8086 fa 10byte integer...
 #endif
   "FILL",0x13,   // 
   "ORG",0x20,
   "ALIGN",0x21,
 #if ST62  
-  "BLOCK",0x22,   // blocca (riserva, salta) un numero di byte e quindi allinea
+  ".BLOCK",0x22,   // blocca (riserva, salta) un numero di byte e quindi allinea
   								// usato in generale per lo ST62 come: .block  64-$%64
 #endif
   "EQU",0x100,"SET",0x100,
@@ -4673,15 +4712,17 @@ struct MY_CODE MCom[] = {
   "=",0x100,
 //  "COUNT",0x101,
   "ENDC",0x102,
-  "CSEG",0x1000,"TEXT",0x1000,"PSECT",0x1000,
-#ifdef I8086
+	"TEXTEQU",0x103,
+  "CSEG",0x1000,"TEXT",0x1000,"PSECT",0x1000,".CODE",0x1000,		//lascio . qua
+#if I8086
 	"SEGMENT",0x1000,
 #endif
-  "DSEG",0x1001,
+  "DSEG",0x1001,".DATA",0x1001,		// idem .
   "CSECT",0x1002,
   "DSECT",0x1003,
   "CONST",0x1004,"RODATA",0x1004,
-  "BSS",0x1005,"ZDATA",0x1005,		//			fare		https://www.rowleydownload.co.uk/msp430/documentation/index.htm?https://www.rowleydownload.co.uk/msp430/documentation/has_directive_keep.htm
+  "BSS",0x1005,"ZDATA",0x1005,				//			fare		https://www.rowleydownload.co.uk/msp430/documentation/index.htm?https://www.rowleydownload.co.uk/msp430/documentation/has_directive_keep.htm
+	/*"DATA?",0x1005,MASM gestito a parte!*/		// https://learn.microsoft.com/en-us/cpp/assembler/masm/dot-data-q?view=msvc-170
   "ISR",0x1006,		// fare...
   "ESEG",0x1007,		// da microchip, per EEprom
   "PROC",0x1010,"ENTRY",0x1010,
@@ -4694,7 +4735,7 @@ struct MY_CODE MCom[] = {
   "ASSUME32",0x1040,
   "ASSUME64",0x1041,
 #endif
-#ifdef I8086
+#if I8086
   "ASSUME",0x1040,
 #endif
   "TITLE",0x2000,
@@ -4703,7 +4744,7 @@ struct MY_CODE MCom[] = {
   "%",0x2003,
   "EJECT",0x2004,
 #if ST62
-  "DISPLAY",0x2005,
+  ".DISPLAY",0x2005,
 #endif
 #if PIC==16
   "LIST",0x2005,
@@ -4717,26 +4758,33 @@ struct MY_CODE MCom[] = {
   "__CONFIG",0x2010,"CONFIG",0x2010,      // 
   "__IDLOCS",0x2011,
 #endif
-#ifdef I8086
-	"CPU",0x2101,// anche i vari .8086 .80186 ecc...
+	".CPU",0x2101,
+#if I8086
+	".8086",0x2110,".80186",0x2111,".80286",0x2112,".80386",0x2113,".80486",0x2114,".80586",0x2115,
 #endif
   "MACRO",0x4000,
   "EXITM",0x4001,
   "ENDM",0x4002,
+  "LOCAL",0x4003,
+	".LALL",0x4010,".LISTMACROALL",0x4010,
+	".LISTMACRO",0x4011,
+	".NOLISTMACRO",0x4012,
   "STRUC",0x4100,
   "UNION",0x4101,
   "RECORD",0x4102,
   "ENDS",0x410F,
   "INCLUDE",0x8000, "INPUT",0x8000,
   "IF",0x8010,"IFE",0x8011,"IFDEF",0x8012,"IFNDEF",0x8013,"IFIDN",0x8014,"IFDIF",0x8015,"IFIDNI",0x8016,"IFDIFI",0x8017,"IFB",0x8018,"IFNB",0x8019,
+	"IF1",0x801a,"IF2",0x801b,//per pass1/2  (MASM
   "DEFINE",0x8030,
   "ELSE",0x8020,
   "ELSEIF",0x8021,
 	// anche TUTTI quelli come IF ELSEIFDIF ecc! v. masm
   "ENDIF",0x802f,
+  "REPT",0x8040,"REPEAT",0x8040,"WHILE",0x8041,"FORC",0x8042,			// ecc... masm
   "PRAGMA",0x8080,
-  "WARNING",0x8090,
-  "ERROR",0x8091,
+  "WARNING",0x8090,"ECHO",0x8090, "%OUT",0x8090,		// verificare % masm
+  "ERROR",0x8091,".ERR1",0x8092,".ERR2",0x8093,
   NULL,0
   };
 

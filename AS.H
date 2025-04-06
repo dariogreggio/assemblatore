@@ -17,29 +17,36 @@
 #define __VER__ 0
 #define INT_SIZE 4
 #define PTR_SIZE 4
+#define COPYRIGHT_STRING "The G.Dar Assembler for the Archimedes on PC, (C) 1994"
 #elif Z80
-#define __VER__ ((1 << 8) | 33)
+#define __VER__ ((1 << 8) | 35)
 #define INT_SIZE 1
 #define PTR_SIZE 2
+#define COPYRIGHT_STRING "Assemblatore di G.Dar per lo Z80 su PC, (C) 1994-2024"
 #elif I8051
-#define __VER__ ((1 << 8) | 0)
+#define __VER__ ((1 << 8) | 1)
 #define INT_SIZE 1
 #define PTR_SIZE 1
+#define COPYRIGHT_STRING "Assemblatore per lo 8051 su PC (C) 1994"
 #elif ST62
-#define __VER__ ((1 << 8) | 0)
+#define __VER__ ((1 << 8) | 1)
 #define INT_SIZE 1
 #define PTR_SIZE 1
+#define COPYRIGHT_STRING "Assemblatore per ST62XX su PC, (C) 2000"
 #elif _6502
-#define __VER__ ((1 << 8) | 4)
+#define __VER__ ((1 << 8) | 5)
 #define INT_SIZE 1
 #define PTR_SIZE 1
+#define COPYRIGHT_STRING "Assemblatore di G.Dar per il 6502 su PC, (C) 1994-2024"
 #elif PIC
 #define __VER__ ((1 << 8) | 1)
 #define INT_SIZE 1
 #if PIC==16
 #define PTR_SIZE 1
+#define COPYRIGHT_STRING "Assemblatore per PIC16 su PC (C) 2020"
 #elif PIC==18
 #define PTR_SIZE 2
+#define COPYRIGHT_STRING "Assemblatore per PIC18 su PC (C) 2020"
 #elif PIC==24
 #define PTR_SIZE 3
 #elif PIC==32
@@ -49,13 +56,17 @@
 #define __VER__ ((1 << 8) | 6)
 #define INT_SIZE 4
 #define PTR_SIZE 4
+#define COPYRIGHT_STRING "Assemblatore per GD24032 su PC (C) 2024"
 #elif I8086
-#define __VER__ ((0 << 8) | 90)
-#define INT_SIZE 2		// 4??
-#define PTR_SIZE 2		// 4 idem gestire CPULevel
+#define __VER__ ((1 << 8) | 0)
+#define INT_SIZE 2		// (CPULevel<3 ? 2 : 4) 4??
+#define PTR_SIZE 2		// (CPULevel<3 ? 2 : 4) 4 idem gestire CPULevel
+#define COPYRIGHT_STRING "Assemblatore di G.Dar per l'80x86"
 #endif
 
 #define MAX_NAME_LEN 63
+#define MAX_NESTED_PROC 10
+#define MACRO_SIZE 2048		// v. e cmq fare dinamico
 
 struct ERRORE {
   int16_t t;
@@ -71,7 +82,7 @@ struct SUB_CODE {
     
 struct CODE {
   const char *s;               // mnemonico
-  const struct SUB_CODE *a;          // struttura, con op-code 
+  const struct SUB_CODE *a;    // struttura, con op-code 
   };
         
 extern struct CODE Mnem[];
@@ -106,20 +117,26 @@ typedef int32_t NUM_TYPE;
 
 // VARSIZE% DIMENSIONI (PER LE FUNZIONI E' LA DIM. DI QUELLO CHE sono)
 enum VAR_TYPES {
-// VARTYPE% BITS:
-// 0= label, 7=public defined, 8=FUNZ., 9=public, 10=extern, 11=STRUCT
-	VAR_LABEL=1,
+// (VARTYPE% BITS:
+// (0= label, 7=public defined, 8=FUNZ., 9=public, 10=extern, 11=STRUCT
+	VAR_NUMBER=0,
+	VAR_FLOAT=8,
+	VAR_ADDRESS=1,		// ossia Allocata in memoria! DB, PROC ecc, da rilocare dunque
+	VAR_LABEL=2,		// LABEL
 	VAR_PUBLIC_DEFINED=0x80,
 	VAR_FUNZ=0x100,
 	VAR_PUBLIC=0x200,
 	VAR_EXTERN=0x400,
 	VAR_STRUCT=0x800,
 	VAR_UNION=0x1000,
-	VAR_RECORD=0x2000
+	VAR_RECORD=0x2000,
+	VAR_ARRAY=0x4000,
+	VAR_STRING=0x8000
+//	VAR_STRING_LITERAL=0x8000
 	};
 
 struct VARS {
-  char label[MAX_NAME_LEN+1];
+  char name[MAX_NAME_LEN+1];
   struct VARS *proc;
   uint16_t size;
   uint16_t type;	// 1=equ, 0x80=label(?), 0x100=proc, 0x200=public, 0x400=extern, 0x1000=struct, 0x2000=record
@@ -128,6 +145,9 @@ struct VARS {
   NUM_TYPE value;
   int16_t  segm;
   int16_t  dim;
+//	char		*data;			// per array/stringhe  NO uso value
+  uint16_t localUsed;		// per local in funzioni/proc
+  uint32_t regsSaved;		// per salvare registri (bitmask, LSB first
   int32_t  lpos;                  //per extern in file obj
   int16_t  extUsed;
 //  struct TAGS *parent;         // se <>0, la var. è un membro della struct parent
@@ -136,7 +156,7 @@ struct VARS {
   };
 
 struct TAGS {
-  char label[MAX_NAME_LEN+1];
+  char name[MAX_NAME_LEN+1];
   uint16_t size;
   uint16_t type;	// v. sopra, solo alcuni casi ovviamente
   uint16_t pos;		// l'offset nella struct o aggr
@@ -149,12 +169,13 @@ struct TAGS {
   };  
    
 struct SEGS {
-  char label[MAX_NAME_LEN+1];
+  char name[MAX_NAME_LEN+1];
   uint16_t type;
   uint8_t  align;
   uint8_t  unused;
   uint32_t BaseAddr;			// 0xffffffff se non impostato
   uint32_t CurAddr;
+  uint32_t MaxAddr;
   uint32_t len;
   uint32_t lpos;			// pos code nel file oggetto
   uint32_t lposName;	// pos name/label nel file oggetto
@@ -200,12 +221,12 @@ enum SEGMENT_TYPES {
 	SEGMENT_CONFIG=0x2100 | (4),
 	SEGMENT_IDLOCS=0x2200 | (4),
 #endif
-	SEGMENT_ABS=0x4100,
-	SEGMENT_VIRT=0x8000,
+	SEGMENT_ABS=0x4100 | (4),
+	SEGMENT_VIRT=0x8000 | (4),
 
 	SEG_UNDEFINED=-1,
 	SEG_EXTERN=0x00ff,
-	SEG_ABS=0,
+//	SEG_ABS=0,
 	SEG_NONE=0
 	};
 
@@ -223,9 +244,10 @@ enum VQ_ELEM {
 	VQ_REGISTER=-1,
 	VQ_OP_VAR=0,
 	VQ_VAR=1,
-	VQ_COMMA=2,
-#if _6502
-	VQ_VAR_IMM=3,		// solo _6502.. ma c'è anche in PIC16, verificare cfr PIC18
+	VQ_COST=2,
+	VQ_COMMA=3,
+#if _6502 || PIC
+	VQ_VAR_IMM=4,		// solo _6502.. ma c'è anche in PIC16, verificare cfr PIC18
 #endif
 	};
 
@@ -319,11 +341,13 @@ enum ADDR_MODE {
 	ADDR_28=28,// 28
 #elif I8051
 	ADDR_IMM16=3,
-	ADDR_5=5,// 5	 
+	ADDR_IX_IY=5,// 5	 
 	ADDR_9=9,// 9	ld a,(bc), jp (hl)
 	ADDR_10=10,// 10 ld a,b			or b
+	ADDR_11=11,// 10 ld a,b			or b
 	ADDR_12=12,// 12 jp (ix)
 	ADDR_14=14,// 14 jp abs
+	ADDR_17=17,// 
 	ADDR_18=18,// 18
 	ADDR_19=19,// 19
 	ADDR_20=20,// 20
@@ -335,13 +359,24 @@ enum ADDR_MODE {
 	ADDR_CONDIZ=41,
 	ADDR_BIT=50,// 50		bit ecc
 //	ADDR_51=51,// 51		bit ecc
+	ADDR_BIT2=51,// 51		bit ecc
 	ADDR_60=60,// 60		
 	ADDR_61=61,// 61		
 	ADDR_62=62,
 	ADDR_63=63,
 #elif ST62
 	ADDR_IMM16=3,
+	ADDR_IX_IY=5,// 5	 
+	ADDR_IY=6,// 6	 
+	ADDR_10=10,// 10 ld a,b			or b
+	ADDR_11=11,// 10 ld a,b			or b
+	ADDR_14=14,// 14 jp abs
+	ADDR_17=17,// 
+	ADDR_24=24,// 24
+	ADDR_25=25,// 25
+	ADDR_CONDIZ_IMM=40,
 	ADDR_CONDIZ=41,
+	ADDR_BIT=50,// 50		bit ecc
 #elif PIC==16
 	ADDR_8=5,
 #elif PIC==18
@@ -458,14 +493,17 @@ enum ADDR_MODE {
 
 struct LINE_DEF {
 	uint16_t used;
+	struct VARS *vars;
   struct LINE_DEF *next;
   struct LINE_DEF *prev;
-  char s[1];
+  char name[MAX_NAME_LEN+1];
+  char *text;
   };
   
 struct SEGMENTED_VALUE {
 	NUM_TYPE v;
 	int16_t seg;
+	uint16_t t;			// 0=numero, 1=stringa, 2=var
 	bool valid;
 	};
 
@@ -491,7 +529,8 @@ struct OPERAND {
 #endif
 	};
 
-extern signed char UNDEFD,IfDefs;   
+#define MAX_DEFS 10
+extern signed char UNDEFD[MAX_DEFS],IfDefs;   
 extern int Segs,SX;
 extern int LABEL;
 extern uint8_t Brack;
@@ -505,7 +544,7 @@ extern int __line__,__page__;
 extern char __date__[10];
 extern char __time__[10];
 extern signed char IgnoreCase;            // LABEL tutte uppercase -M
-extern FILE *FCod,*FMap,*FPre,*FIn,*FObj;
+extern FILE *FCod,*FMap,*FPre,*FIn,*FObj,*FErr;
 extern signed char OutVars;               // INSERISCE NELL'OUTPUT LE VARIABILI E LE LINEE -n
 extern signed char OutList;               // CREA FILE LISTING source         -l, -Fc
 extern signed char OutCycle;               // riporta i cicli macchina per istr.
@@ -536,22 +575,23 @@ NUM_TYPE FNGetBin(const char *);
 uint64_t strtoull(const char *nptr, char **endptr, int8_t);
 int lltoa(uint64_t num, char *str, /*int len, */ int base);
 int subBytes(const char *s, int m, uint64_t l);
-int FNIsStmt(const char *);   
+uint8_t FNIsStmt(const char *);   
 void gotoEOL();
 char *FNGetLabel(char *,int8_t);
 char *FNGetConst(char *);
 long FNGetLine(long, char *);
 enum ARITM_ELEM FNGetAritElem(char *, struct OPERAND *, uint8_t);
 struct SEGMENTED_VALUE FNEvalExpr(uint8_t, void *);
+struct SEGMENTED_VALUE FNEvalString(const char *str,const struct LINE_DEF *M,void *C,char parms[10][32],uint8_t parmCnt);
 int FNRev(uint8_t, struct OPERAND *o, void *);
 int FNGetSize(struct SEGMENTED_VALUE);
-long FNGetASCII(const char *);
+NUM_TYPE FNGetASCII(const char *);
 long FNIsType(const char *);
 int FNIsOp(const char *,uint8_t);
 int FNIsDirective(const char *);
 int FNIsReg(const char *);
 int FNIsCond(const char *);
-struct VARS *FNCercaVar(const char *, uint32_t, uint8_t, uint8_t);
+struct VARS *FNCercaVar(const char *, uint32_t, uint32_t, uint8_t, uint8_t);
 struct TAGS *FNCercaAggr(const char *, uint8_t, uint32_t);
 int FNCercaSeg(const char *);
 int PROCWarn(int, const char *s=NULL);
@@ -579,6 +619,7 @@ NUM_TYPE FNInitAggr(struct TAGS *,bool);
 int PROCDclSeg(const char *,enum SEGMENT_TYPES);
 int PROCAssign(struct LINE *, int, long, int);
 //int PROCGetType(int *, long *, struct TAGS **, int *, long);
+void bumpIfs(int8_t direction,uint8_t state,uint8_t level);
 int PROCObj();
 int PROCS(const char *);
 int PROCV(FILE *);
@@ -593,15 +634,20 @@ void Libera2(struct TAGS *root);
 
 struct LINE_DEF *FNDefined(const char *A);
 char *FNGetNextPre(FILE *FI, int F, char *s);
+int8_t FNGetParms(const struct LINE_DEF *M,const char *string,char *s1,char *s2,char parms[10][32],uint8_t parmCnt);
 struct LINE_DEF *PROCDelLista(struct LINE_DEF *Root, struct LINE_DEF *Last, struct LINE_DEF *l);
 int PROCDefine(const char *A, const char *B);
-int PROCDefineMacro(const char *A, const char *B);
+struct LINE_DEF *PROCDefineMacro(const char *A, const char *B);
+struct LINE_DEF *PROCRedefineMacro(struct LINE_DEF *D, const char *B);
+struct VARS *FNAllocMacroVar(struct LINE_DEF *,const char *,uint8_t);
+int8_t FNSubstituteVars(const struct LINE_DEF *M,const char *var,char *buf,char parms[10][32],uint8_t parmCnt);
 struct LINE_DEF *FNMacro(const char *A);
 char *TranslateMacro(const struct LINE_DEF *macro,const char *smacro,char *text,const char *sparm);
 
 uint8_t asc2hex(unsigned short int t);
-uint8_t *convertHEX2BIN(FILE *,uint32_t *);
+uint8_t *convertHEX2BIN(FILE *,uint32_t *,uint32_t *);
 int8_t isasym(char ch);
+int8_t isadsym(char ch);
 
 #define MAKEWORD(a, b)   ((uint16_t) (((uint8_t) (a)) | ((uint16_t) ((uint8_t) (b))) << 8)) 
 #define MAKELONG(a, b)   ((uint32_t) (((uint16_t) (a)) | ((uint32_t) ((uint16_t) (b))) << 16)) 
@@ -618,7 +664,9 @@ int8_t isasym(char ch);
 #define min(a,b) (a) < (b) ? (a) : (b)
 
 const char *stristr(const char *s1,const char *s2);
+char *strmove(char *tgt,const char *src);
 char* replace_char(char* str, char find, char replace);
+const char *parse_parm(const char *str,char *buf,bool skipCR=FALSE);
 
 
 #pragma pack( push, before_structs )
@@ -876,6 +924,18 @@ struct COFF_RELOCATIONS {
 	//10
 	};
 
+enum {
+	IMAGE_REL_I386_ABSOLUTE=0x0000,
+	IMAGE_REL_I386_DIR16=0x0001,
+	IMAGE_REL_I386_REL16=0x0002,
+	IMAGE_REL_I386_DIR32=0x0006,
+	IMAGE_REL_I386_DIR32NB=0x0007,
+	IMAGE_REL_I386_SEG12=0x0009,
+	IMAGE_REL_I386_SECTION=0x000A,
+	IMAGE_REL_I386_SECREL=0x000B,
+	IMAGE_REL_I386_REL32=0x0014
+	};
+
 struct COFF_LINENUMBERS {
 	union {
 		uint32_t type;
@@ -900,6 +960,58 @@ struct COFF_SYMBOL_NAME {
 	uint32_t zeroes;
 	uint32_t offset;
 	//16
+	};
+
+enum {
+	IMAGE_SYM_TYPE_NULL=0,
+	IMAGE_SYM_TYPE_VOID=1,
+	IMAGE_SYM_TYPE_CHAR=2,
+	IMAGE_SYM_TYPE_SHORT=3,
+	IMAGE_SYM_TYPE_INT=4,
+	IMAGE_SYM_TYPE_LONG=5,
+	IMAGE_SYM_TYPE_FLOAT=6,
+	IMAGE_SYM_TYPE_DOUBLE=7,
+	IMAGE_SYM_TYPE_STRUCT=8,
+	IMAGE_SYM_TYPE_UNION=9,
+	IMAGE_SYM_TYPE_ENUM=10,
+	IMAGE_SYM_TYPE_MOE=11,
+	IMAGE_SYM_TYPE_BYTE=12,
+	IMAGE_SYM_TYPE_WORD=13,
+	IMAGE_SYM_TYPE_UINT=14,
+	IMAGE_SYM_TYPE_DWORD=15
+	};
+enum {
+	IMAGE_SYM_UNDEFINED=0,
+	IMAGE_SYM_ABSOLUTE=-1,
+	IMAGE_SYM_DEBUG=-2
+	};
+enum {
+	IMAGE_SYM_CLASS_END_OF_FUNCTION=-1,
+	IMAGE_SYM_CLASS_NULL=0,
+	IMAGE_SYM_CLASS_AUTOMATIC=1,
+	IMAGE_SYM_CLASS_EXTERNAL=2,
+	IMAGE_SYM_CLASS_STATIC=3,
+	IMAGE_SYM_CLASS_REGISTER=4,
+	IMAGE_SYM_CLASS_EXTERNAL_DEF=5,
+	IMAGE_SYM_CLASS_LABEL=6,
+	IMAGE_SYM_CLASS_UNDEFINED_LABEL=7,
+	IMAGE_SYM_CLASS_MEMBER_OF_STRUCT=8,
+	IMAGE_SYM_CLASS_ARGUMENT=9,
+	IMAGE_SYM_CLASS_STRUCT_TAG=10,
+	IMAGE_SYM_CLASS_MEMBER_OF_UNION=11,
+	IMAGE_SYM_CLASS_UNION_TAG=12,
+	IMAGE_SYM_CLASS_TYPE_DEFINITION=13,
+	IMAGE_SYM_CLASS_UNDEFINED_STATIC=14,
+	IMAGE_SYM_CLASS_ENUM_TAG=15,
+	IMAGE_SYM_CLASS_MEMBER_OF_ENUM=16,
+	IMAGE_SYM_CLASS_REGISTER_PARAM=17,
+	IMAGE_SYM_CLASS_BIT_FIELD=18,
+	IMAGE_SYM_CLASS_BLOCK=100,
+	IMAGE_SYM_CLASS_FUNCTION=101,
+	IMAGE_SYM_CLASS_END_OF_STRUCT=102,
+	IMAGE_SYM_CLASS_FILE=103,
+	IMAGE_SYM_CLASS_SECTION=104,
+	IMAGE_SYM_CLASS_WEAK_EXTERNAL=105
 	};
 
 struct COFF_AUXILIARY_FORMAT1 {

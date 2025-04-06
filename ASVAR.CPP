@@ -4,7 +4,8 @@
 #include "as.h"
 
 extern uint8_t CPULevel;
-extern uint8_t inIfDef;
+extern struct VARS *CurProc[MAX_NESTED_PROC];
+extern uint8_t CurProcLevel;
 
 enum ARITM_ELEM FNGetAritElem(char *VS, struct OPERAND *o, uint8_t Co) {
 // O% (RISULTATO) = 1 SE COSTANTE
@@ -20,6 +21,7 @@ enum ARITM_ELEM FNGetAritElem(char *VS, struct OPERAND *o, uint8_t Co) {
   char TS[256],T1S[256],MyBuf[256];
 //  char *p;
 	unsigned char imm=0;
+	struct SEGMENTED_VALUE *lVCost=(struct SEGMENTED_VALUE *)VS;
   
   FNLO(VS);
   
@@ -38,7 +40,7 @@ rifo:
       return ARITM_EOL;
       break;
     case ')':
-    case ']':		// 2024, ma non so è sarebbe giusto - le quadre sarebbero SOLO per Indirect, non matematica...
+    case ']':		// 2024, ma non so è/sarebbe giusto - le quadre sarebbero SOLO per Indirect, non matematica...
       if(!Brack) {
 	      theLinePtr--;
         return ARITM_EOL;
@@ -58,13 +60,14 @@ rifo:
       break;
     case '$':
       if(!*(VS+1)) {
-	      o->T=0;
+	      o->T=VAR_NUMBER;
 	      o->S=2;
 	      o->V=VQ_OP_VAR;
 //	      sprintf(VS,"%lu",Seg[CurSeg-1].CurAddr);
-				((struct SEGMENTED_VALUE *)VS)->v=Seg[CurSeg-1].CurAddr;
-				((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
-				((struct SEGMENTED_VALUE *)VS)->seg=CurSeg;
+				lVCost->v=Seg[CurSeg-1].CurAddr;
+				lVCost->valid=TRUE;
+				lVCost->seg=CurSeg;
+				lVCost->t=0;
 //				printf("$ vale %lx\n",*(long *)VS);
 	      return ARITM_CONST;               
 	      }
@@ -80,18 +83,28 @@ rifo:
 #endif
       break;
     case '?':
-      o->T=0;
+      o->T=VAR_NUMBER;
       o->S=2;
       o->V=VQ_OP_VAR;
 //      *VS='0';
 //      *(VS+1)=0;
-			((struct SEGMENTED_VALUE *)VS)->v=-1;
-			((struct SEGMENTED_VALUE *)VS)->seg=0;
-			((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
+			lVCost->v=-1;
+			lVCost->seg=SEG_NONE;
+			lVCost->valid=TRUE;
+			lVCost->t=0;
+      return ARITM_CONST;               
+      break;
+    case '\'':
+      o->T=VAR_NUMBER;
+      o->V=VQ_OP_VAR;
+			lVCost->v=FNGetASCII(VS);
+			lVCost->seg=SEG_NONE;
+			lVCost->valid=TRUE;
+			lVCost->t=0;
+      o->S=FNGetSize(*lVCost);
       return ARITM_CONST;               
       break;
     case '\"':
-    case '\'':
 /*      p=TS;
       i=0;
       while(*p) {
@@ -101,11 +114,17 @@ rifo:
       */
 //      if(!i)
 //        PROCError(2137,C);         // vorrei lasciare passare "" ma non ''...
-      o->T=0;
+      o->T=VAR_STRING;
       o->S=1;                 
       o->V=VQ_VAR;
 //  if(debug) 
 //    fprintf(stderr,"1: VS %s V %d, T %d, S %d\n",VS,*V,*TYPE,*SIZE);
+
+//			lVCost->t=1;
+// NON DOVREBBE ANCORA ESSERE USATO MA SE LO METTO Dà FASTIDIO IN GIRO...31/3/25
+
+
+
       return ARITM_CONST;
       break;
 #if _6502		// in effetti potrebbe andare pure sugli altri, ma non si fa di solito
@@ -126,7 +145,7 @@ isNumber:
     case '9':
       if(strchr(VS,'.')) {
         strcpy(T1S,"0 ; FLOAT");
-        o->T=0x0;
+        o->T=VAR_FLOAT;
         o->S=8;
 //        strcpy(VS,Con[FNAllocCost(VS,T1S,3)].label);
         o->V=VQ_OP_VAR;
@@ -137,10 +156,8 @@ isNumber:
 					goto isHex;
 					}
         j=strlen(VS)-1;
-        i=VS[j];
-        switch(i) {
+        switch(tolower(VS[j])) {
           case 'h':
-          case 'H':
             VS[j]=0;
 isHex:
 #if GD24032
@@ -150,14 +167,11 @@ isHex:
 						T1=strtoul(VS,NULL,16);
 #endif
             break;
-          case 'B':
           case 'b':
             VS[j]=0;
             T1=FNGetBin(VS);
             break;
-          case 'O':
           case 'o':
-          case 'Q':
           case 'q':
             VS[j]=0;
             T1=FNGetOct(VS);
@@ -203,12 +217,12 @@ isHex:
           }
 //        sprintf(VS,"%lu",T1);
 				{
-				struct SEGMENTED_VALUE *ll=((struct SEGMENTED_VALUE *)VS);
-				ll->v=T1;
-				ll->seg=SEG_NONE;
-				ll->valid=TRUE;
-	      o->T=0;
-	      o->S=FNGetSize(*ll);
+				lVCost->v=T1;
+				lVCost->seg=SEG_NONE;
+				lVCost->valid=TRUE;
+				lVCost->t=0;
+	      o->T=VAR_NUMBER;
+	      o->S=FNGetSize(*lVCost);
 				}
 #if _6502
 				o->V=imm ? VQ_VAR_IMM : VQ_OP_VAR;
@@ -220,7 +234,38 @@ isHex:
 //    fprintf(stderr,"1: V %d, T %d, S %d\n",*V,*TYPE,*SIZE);
       return ARITM_CONST;
       break;
+		case 'T':
+		case 't':
+			if(!strcmp(VS,"TRUE")) {
+				lVCost->v=/* - :) */ 1;
+				lVCost->seg=SEG_NONE;
+				lVCost->valid=TRUE;
+				lVCost->t=0;
+	      o->T=VAR_NUMBER;
+	      o->S=1;
+				o->V=VQ_OP_VAR;
+	      return ARITM_CONST;
+				}
+			else
+				goto no_special;
+			break;
+		case 'F':
+		case 'f':
+			if(!strcmp(VS,"FALSE")) {
+				lVCost->v=0;
+				lVCost->seg=SEG_NONE;
+				lVCost->valid=TRUE;
+				lVCost->t=0;
+	      o->T=VAR_NUMBER;
+	      o->S=1;
+				o->V=VQ_OP_VAR;
+	      return ARITM_CONST;
+				}
+			else
+				goto no_special;
+			break;
     default:
+no_special:
       o->op=FNIsOp(VS,Co);
       if(o->op) {
 //        strcpy(VS,TS);
@@ -285,47 +330,119 @@ isHex:
         else {
 					struct TAGS *myT;
 isVar:
-          if(o->var=FNCercaVar(VS,0,FALSE,CPass)) {
-	          o->T=0;
+					if(CurProcLevel>0) {
+						if(o->var=FNCercaVar(VS,(uint32_t)CurProc[CurProcLevel-1],0,FALSE,CPass)) {
+							struct SEGMENTED_VALUE ll;
+#if Z80
+							o->T=14;		// IY VERIFICARE!
+#elif I8051
+							o->T=9;		// R6 VERIFICARE!
+#elif ST62
+							o->T=2;		// Y VERIFICARE!
+#elif _6502
+							o->T=3;		// S VERIFICARE!
+#elif PIC==16 || PIC==18
+							o->T=2;		// IND2 verificare
+#elif GD24032
+							o->T=29;		// R29 VERIFICARE!
+#elif I8086
+							o->T=13;		// BP
+#endif
+//							o->V=VQ_OP_VAR;
+				      o->V=VQ_REGISTER;
+							o->Ind=TRUE;
+							T1=o->var->value;
+							o->S=o->var->size;
+							lVCost->v=T1;
+
+							lVCost->seg=SEG_NONE;
+							lVCost->valid=TRUE;
+							lVCost->t=2;
+							o->l.t=2;
+							o->l.v=lVCost->v;
+			        return ARITM_VAR;
+							}
+						}
+          if(o->var=FNCercaVar(VS,0,0,FALSE,CPass)) {
+						struct SEGMENTED_VALUE ll;
+	          o->T=o->var->type;
 	          o->V=VQ_OP_VAR;
 	          T1=o->var->value;
-						struct SEGMENTED_VALUE ll;
 						ll.v=T1;
 						ll.seg=o->var->segm;
-			      o->S=FNGetSize(ll);
+						if(o->var->type & VAR_ADDRESS)
+							o->S=FNGetSize(ll);
+						else
+							o->S=o->var->size;
 //            sprintf(VS,"%lu",T1);
-            ((struct SEGMENTED_VALUE *)VS)->v=T1;
-            ((struct SEGMENTED_VALUE *)VS)->seg=o->var->segm;
-            ((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
+            lVCost->v=T1;
+
+
+
+//						if(o->var->type & VAR_STRING)
+//							strcpy(VS,(char*)o->var->value);
+
+
+
+            lVCost->seg=o->var->segm;
+            lVCost->valid=TRUE;
+						lVCost->t=2;
+						o->l.t=2;
 			      }
           else if(myT=FNCercaAggr(VS,0,0)) {	// solo top-level record
-					  struct SEGMENTED_VALUE l;
 						struct TAGS *myT2;
-	          o->T=0;
+	          o->T=myT->type & (VAR_RECORD | VAR_STRUCT | VAR_UNION);
 	          o->V=VQ_OP_VAR;
-			      if(myT->type & VAR_RECORD)
+//						o->var=(struct VARS*)myT;
+						if(myT->type & VAR_RECORD) {
 							o->S=(myT->size+7)/8;
-						else
-							o->S=myT->size;
-            ((struct SEGMENTED_VALUE *)VS)->v=myT->value;
-            ((struct SEGMENTED_VALUE *)VS)->seg=SEG_UNDEFINED;
-            ((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
-
-						if(*FNLA(MyBuf) == '<') {		// può non esserci... quando è usato come Tipo o come Cast
-//						if(Co>2 && *FNLA(MyBuf) == '<')
-							((struct SEGMENTED_VALUE *)VS)->v=FNInitAggr(myT,FALSE);
-
-/*							((struct SEGMENTED_VALUE *)VS)->v=FNUpdAggr(myT);*/
+	            lVCost->v=myT->value;
 							}
-						else
-							((struct SEGMENTED_VALUE *)VS)->v=FNUpdAggr(myT);
+						else {
+							o->S=myT->size;
+	            lVCost->v=(int)myT;
+							}
+            lVCost->seg=SEG_UNDEFINED;
+            lVCost->valid=TRUE;
+						lVCost->t=0  /*o->T*/;
+						o->l.t=0;
+
+						if(myT->type & VAR_RECORD) {
+							if(*FNLA(MyBuf) == '<') {		// può non esserci... quando è usato come Tipo o come Cast
+	//						if(Co>2 && *FNLA(MyBuf) == '<')
+								lVCost->v=FNInitAggr(myT,FALSE);
+
+	/*							lVCost->v=FNUpdAggr(myT);*/
+								}
+							else
+								lVCost->v=FNUpdAggr(myT);
+							o->S=FNGetSize(*lVCost);		// e sopra?? boh...
+							}
+						else {
+
+							}
+			      }
+          else if(myT=FNCercaAggr(VS,2,0)) {	// e ora i membri (scandaloso MASM
+						lVCost->v=myT->pos;
+
+// questa parte da MSB!! è giusto così o no?? v. VID GlaBIOS
+
+
+            lVCost->seg=SEG_UNDEFINED;
+            lVCost->valid=TRUE;
+						lVCost->t=0  /*o->T*/;
+	          o->T=VAR_NUMBER;
+	          o->V=VQ_COST;
+						o->S=1;
+						o->l.t=0;
 			      }
           else if(i=FNCercaSeg(VS)) {
-	          o->T=0;
+	          o->T=VAR_NUMBER;
 	          o->V=VQ_OP_VAR;
-            ((struct SEGMENTED_VALUE *)VS)->v=0;
-						((struct SEGMENTED_VALUE *)VS)->seg=i;			// non era giusto metterla in v?? (2024..verificare...
-            ((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
+            lVCost->v=0;
+						lVCost->seg=i;			// non era giusto metterla in v?? (2024..verificare...
+            lVCost->valid=TRUE;
+						lVCost->t=0;
 #if GD24032
 			      o->S=8;
 #else
@@ -333,20 +450,15 @@ isVar:
 #endif
 			      }
 	        else {		// qua per una label-forward declaration, quindi metto il segmento (2024)
-	          o->T=0;
+	          o->T=VAR_NUMBER;
 	          o->V=VQ_OP_VAR;
 	          o->S=1;
-						if(CPass) {
-							if(!inIfDef)
-								PROCError(2065,VS);
-							else {
-					      theLinePtr-=2;                        // patch per IF GT ecc...
-								return ARITM_NONE;
-								}
-							}
-            ((struct SEGMENTED_VALUE *)VS)->v=0;
-						((struct SEGMENTED_VALUE *)VS)->seg=SEG_UNDEFINED /*CurSeg*/;
-            ((struct SEGMENTED_VALUE *)VS)->valid=TRUE;
+				    if(CPass)         
+	            PROCError(2065,VS);
+            lVCost->v=0;
+						lVCost->seg=SEG_UNDEFINED /*CurSeg*/;
+            lVCost->valid=TRUE;
+						lVCost->t=0;
 //            sprintf(VS,"%d",0);
 	          }
           }
@@ -366,14 +478,14 @@ int FNGetSize(struct SEGMENTED_VALUE T) {			//
 		return 4;
 
 	if(!CPass) {
-		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && Seg[T.seg-1].type != SEGMENT_VIRT)
+		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && (Seg[T.seg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
 	//	if(T.seg && T.seg != CurSeg)		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
 
 
 			return 4 /*4*/;		// 8  mah così ci si incasina...
 		}
 	else {
-		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && T.seg != CurSeg && Seg[T.seg-1].type != SEGMENT_VIRT)		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
+		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && T.seg != CurSeg && (Seg[T.seg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
 			return 8 /*4*/;		// 8  mah così ci si incasina...
 		}
 
@@ -381,7 +493,7 @@ int FNGetSize(struct SEGMENTED_VALUE T) {			//
 	if(!T.valid)
 		return 4;
 	if(!CPass) {
-		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && Seg[T.seg-1].type != SEGMENT_VIRT)	{	//2025
+		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && (Seg[T.seg].type & 0xff00) != (SEGMENT_VIRT & 0xff00))	{	//2025
 	//	if(T.seg && T.seg != CurSeg)		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
 
 
@@ -393,8 +505,9 @@ int FNGetSize(struct SEGMENTED_VALUE T) {			//
 			return 2;
 			}
 		}
+
 	else {
-		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && T.seg != CurSeg && Seg[T.seg-1].type != SEGMENT_VIRT) {		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
+		if(T.seg != SEG_NONE && T.seg != SEG_UNDEFINED && T.seg != CurSeg && (Seg[T.seg].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
 //2025		if(T.seg && T.seg != CurSeg)		// in effetti direi di no, forse così? NO sballa 1/2 CPass...
 #if I8086
 			if(CPULevel>=3)
@@ -440,6 +553,9 @@ int FNGetSize(struct SEGMENTED_VALUE T) {			//
 
 int FNIsOp(const char *A, unsigned char Co) {
   int I,T;
+  struct OPERANDO oc,*on;
+  
+//  on=(struct OPERANDO *)bsearch((void *)&oc,Operandi,sizeof(Operandi)/sizeof(struct OPERANDO),sizeof(Operandi[0]),(int (*)(const void *, const void *))subCmpOper);
   
 //  if(strlen(A) > 6)		// bah serve?? 2025 masm ha op + lunghi cmq
 //    return 0;
@@ -473,6 +589,9 @@ int FNIsOp(const char *A, unsigned char Co) {
 
 long FNIsType(const char *A) {
   int I;
+//  struct MY_CODE tc,tcn;
+  
+//  tn=(struct MY_CODE *)bsearch((void *)&tc,MCom,sizeof(MCom)/sizeof(struct MY_CODE),sizeof(MCom[0]),(int (*)(const void *, const void *))subCmpType);
   
 //  for(I=0; I<MaxTypes; I++) {
 //    if(!strcmp(A,Types[I].s)) { 
@@ -484,6 +603,9 @@ long FNIsType(const char *A) {
 
 int FNIsDirective(const char *s) {
   int i;
+  struct MY_CODE cc,*cn;
+  
+//  cn=(struct MY_CODE *)bsearch((void *)&cc,MCom,sizeof(MCom)/sizeof(struct MY_CODE),sizeof(MCom[0]),(int (*)(const void *, const void *))subCmpMyCode);
   
   i=0;
   while(MCom[i].s) {
@@ -492,12 +614,15 @@ int FNIsDirective(const char *s) {
       }          
     i++;
     }
-  return 0;
+  return -1;
   }
 
 int FNIsReg(const char *s) {
   int i;
+  struct REGS rc,*rn;
   
+//  rn=(struct COND *)bsearch((void *)&rc,Reg,sizeof(Reg)/sizeof(struct REGS),sizeof(Reg[0]),(int (*)(const void *, const void *))subCmpReg);
+
 #if Z80
   if(strlen(s) > 2) {
     if(!stricmp(s,Reg[16].s))
@@ -583,7 +708,14 @@ int FNIsReg(const char *s) {
 #elif I8086
   i=0;
   while(Reg[i].s) {
-    if(!stricmp(s,Reg[i].s) && Reg[i].s[2]) { 
+    if(!stricmp(s,Reg[i].s) && Reg[i].s[2] && Reg[i].s[3]) {			// 32bit
+      return i+1 | 0x400;
+      }          
+    i++;
+    }
+  i=0;
+  while(Reg[i].s) {
+    if(!stricmp(s,Reg[i].s) && Reg[i].s[2]) {		// 16bit
       return i+1 | 0x200;
       }          
     i++;
@@ -602,7 +734,10 @@ int FNIsReg(const char *s) {
 
 int FNIsCond(const char *s) {
   int i;
-  
+  struct COND cc,*cn;
+
+//  cn=(struct COND *)bsearch((void *)&cc,Cond,sizeof(Cond)/sizeof(struct COND),sizeof(Cond[0]),(int (*)(const void *, const void *))subCmpCond);
+
 #if Z80
   if(strlen(s) > 2)
     return 0;

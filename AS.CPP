@@ -10,7 +10,7 @@
     *  GD24032 version	7/24 *
 		*  8086 version  2/25    *
     **************************/
-// Come ST62 accetto le direttive anche precedute dal punto. Standard SGS! (2024: tutti...
+// Come ST62 accetto le direttive anche precedute dal punto. Standard SGS! (2024: tutti... no! 2025
 // le label DEVONO avere il : sia per istruzioni che per DEFb/ecc (preferisco  NO! v.MASM 2025 cambiato)
 // in 8086 il segmento per linker lo metto solo se non sono ind. relativi! quindi segm:ofs
 
@@ -22,19 +22,36 @@
 // forse sistemato 4/8/24 (park albatros day) [in modalità BIN (ma anche ELF, con messaggio diverso) dice "impossibile scrivere file BIN" se c'è qualche tipo di errore in compilazione... tipo dati fuori segmento o boh... che però non esce alla riga giusta ma solo al fondo...
 //  [no, lo fa ancora... il primo record esce ciucco ERRORE REPOS segmenti in BIN! ritestare ELF/OBJ...
 
-// [METTERE NUM RIGA in LST?? almeno "ogni tanto"? fatto... gestire opzione ev.
-
 // CALL/BL si incasina tra 1/2pass tentando di andare su byte...
 
 // verificare aggiungere controlli tra 2reg indexed e immediate8...
 
 // ci sono ancora alcuni 0xC0 in 8086, ma è difficile gestirli in tabella... tipo se hanno 00 come primo byte e non uscirebbero, e altro in MOV...
-//sizeof con struct/record
 
-// ho la sensazione che IF/IFDEF ecc nidificate non vadano... ammesso che abbia senso!
-
-// nonostante i vari  if(Seg[CurSeg-1].type != SEGMENT_VIRT) nel file .O mette ancora i segmenti "AT" ossia senza dati... va rifinita la gestione (BIN/HEX è ok)
 // curaddr del seg non conserva la parte alta in certi casi v. segm 2 _BIOS
+// (pare ok 19/3 die USA day il "; line ###" nel LST dà un numero sbagliato se ci sono righe vuote e/o con commento: il # della riga subito prima diventa quello di quella dopo
+// accetta un nome di RECORD anche senza valori <> e non so se sia giusto
+//  i segmenti "AT" devono uscire negli OBJ o no? boh sì, per le ABS/public
+// credo che le rilocazioni per 8086 dovrebbero applicarsi al segment e non all'offset... verificare (ovviamente non nei indir. relativi
+// nei file ELF e COFF mancano i simboli, 
+
+// capire che fare con [ e la sua size  pare debba restituire un indirizzo ossia una label, spostata di[], da usare come OFFSET o come byte(word?
+// in teoria se una label/indirizzo è usata come operando, si potrebbe "dedurre" implicito... (MASM)
+// sostituire stringhe dentro stringhe ecc... 
+// macro ricorsive...
+// (METTERE in LST le righe con solo commento?? MASM lo fa
+
+// pare ok per hex/bin ora (se org non sono in sequenza fa casino di nuovo...
+// RINUMERARE registri 16bit 8086 partendo da 0, v.
+// F6 D0				NOT	AL	 è ciucco, esce F6 00			ok ora
+// MOV	BYTE PTR EQUIP_FLAGS, AL  address esce a 8bit anziché 16
+// D2 C8		     ROR	AL, CL   invece esce D0 C8		ok ora
+// D2 E0				SHL	AL, CL			esce D0 F0		QUESTO F0 è OK, SHL==SAL  ; ok ora
+// C7 49			MOV	CURSOR_DEFAULT, CX   è ciucco, non prende indirect fatto
+// 33 DB				XOR	BX, BX    esce 31 DB			è ok! forma alternativa...
+// 8A E8				MOV	CH, AL    esce 88 C5		è ok! forma alternativa..
+// 0A C5				OR	AL, CH	  esce 08 E8		idem
+// 32 C0				XOR	AL, AL		esce 30 C0		idem
 
 
 #include <stdlib.h>
@@ -47,6 +64,7 @@
 
 char NFS[256];
 char OUS[256];
+extern int lineUsed;		// per ;line in LST
 
 struct VARS *Var, *LVars;
 struct TAGS *StrTag, *LTag;
@@ -54,7 +72,8 @@ struct SEGS Seg[MAX_SEGS];
 // char StrTag[MAX_NAME_LEN+1][200];
 int LABEL;
 
-struct OPERANDO Operandi[]={
+// verifica con MASM tabella 1.3 pag 18
+struct OPERANDO Operandi[]={		// vagamente basata su quelli del C, https://stackoverflow.com/questions/20767745/who-defines-operator-precedence-and-associativity-and-how-does-it-relate-to-ord
   "(",1,")",1,"[",1,"]",1,
   ".",1,			// per struc
 #if I8051
@@ -65,26 +84,27 @@ struct OPERANDO Operandi[]={
   "{",1,"}",1,			// 1??
 #endif
   "~",2,"size",2,"length",2,"sizeof",2,"lengthof",2,"type",2,"low",2,"high",2,"(",2,"!",2,"-",2,/*"dup",2,*/		// che ci fa la par. tonda qua?
+	// anche lowword, highword, MASM 6
 #if I8086
 	"not",2,
-	"byte",2,"word",2,"dword",2,"qword",2,"near",2,"far",2,"ptr",2,
-	"segment",2,"offset",2,
+	"byte",2,"word",2,"dword",2,"qword",2,"near",2,"far",2,"ptr",2,"short",2,
+	"seg",2,"offset",2,
 #endif
 	"mask",2,"width",2,			// per record/bitfield
   "*",3,"/",3,"%",3,
   "+",4,"-",4,		// OKKIO c'è anche in 2 e qua non ha molto senso... boh (a parte quelle con pre/postinc/dec
 #if I8086
-  ":",4,			// solo per far:ptr, il segment override è gestito a parte
+  ":",4,/*"&",4, per concat stringhe... v. in Macro*/			// solo per far:ptr, il segment override è gestito a parte
 #endif
-  "<<",5,">>",5,"SHL",5,"SHR",5,
-	// anche SHR SHL v.masm..
-//  "<",6,">",6,"<=",6,">=",6,		"LT",6,"GT",6,"LE",6,"GE",6,
-//    "<",6,">",6,		li gestisco separatamente cmq...
-//  "==",7,"!=",7, "EQ",7,"NE",7,
+  "<<",5,">>",5,"SHL",5,"SHR",5,	// v.masm..
   "&",8,"AND",8,		// bah TOGLIERE gli operandi "C"? verificare in altri asm, oltre a MASM...
   "^",9,"XOR",9,
   "|",10,"OR",10,
-  "=",14,  "<",14,">",14,	/* casi particolari*/
+  "&&",11,
+  "||",12,
+  "==",14,"!=",14,"EQ",14,"NE",14,   "<",14,">",14, "<=",14,">=",14,		"LT",14,"GT",14,"LE",14,"GE",14,
+	// aggiungere INSTR
+  "=",14, 
   ",",15,
   NULL,0
   };         
@@ -96,30 +116,34 @@ struct OPERANDO Operandi[]={
 	int8_t IgnoreCase=FALSE;
 #endif
 int8_t BranchOpt=0;
+int8_t AllPublics=FALSE;
 int8_t OutMap=FALSE;
 int8_t OutCycle=FALSE;               // riporta i cicli macchina per istr.
 int8_t OutVars=FALSE;
-int8_t OutList=FALSE;
+int8_t OutList=FALSE,OutErr=FALSE;
 int8_t OutError=FALSE;
+int8_t OutMacro=0;			// v. MASM, 0 1 2
 int8_t WarnLevel=0;
 int8_t CreaHex=FALSE,CreaBin=FALSE,CreaElf=0;
 int8_t NoMacro=FALSE;
 int8_t NoSignExtend=TRUE;		// v. MASM, fare
 uint8_t CPULevel=0;				// spec 8086/186/286/386/486 ecc
-struct VARS *CurProc;
-char theLine[1024];
+struct VARS *CurProc[MAX_NESTED_PROC];
+uint8_t CurProcLevel=0;
+char theLine[1024];			// OCCHIO qua ci vanno anche le macro espanse!
 int theLinePtr;
 int16_t CurSeg;
 int16_t DefCSeg,DefDSeg;
 int LastStmt4Cycle=-1;                // memorizzo l'ultimo stmt per i cicli macchina
 uint8_t CPass;
 uint8_t bInizioRiga=FALSE,VarDeclared=FALSE;
-uint8_t inMacroExecuting=FALSE;
+uint8_t inMacroDeclaration=FALSE,inMacroExecuting=FALSE,macroLineNumber;
 unsigned int theMacroPtr;
-char theMacro[1024];
+char theMacro[MACRO_SIZE];
+struct LINE_DEF *CurrMacro;
 uint8_t inStructDeclaration=0;			// 1=struc/union
-uint8_t inIfDef=0;					// per EvalExpr di espressioni in IF, ecc
 uint32_t currVarTag=0;			// la struc o record che sta venendo dichiarata, il "padre" dei membri
+uint8_t inLoop=0,inWhile=0,inFor=0;			// per REPT WHILE ecc
 extern uint32_t OldOffNome,LastAddress;
 
 char __file__[256];
@@ -154,10 +178,15 @@ char *AddExt(char *n, const char *x) {
   }
   
 int subCmpMnem(struct CODE *, struct CODE *);
+int subCmpReg(struct REGS *, struct REGS *);
+int subCmpCond(struct COND *, struct COND *);
+int subCmpMyCode(struct MY_CODE *, struct MY_CODE *);
+int subCmpOper(struct OPERANDO *, struct OPERANDO *);
 
 int PROCInit() {
   int t;
-                           
+
+	// beh che poi sti qsort servono?? i codici li metto già in ordine... 2025
 #if Z80
   qsort(Mnem,67,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
 #elif _6502
@@ -173,7 +202,11 @@ int PROCInit() {
 #elif GD24032
   qsort(Mnem,105,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
 #elif I8086
-  qsort(Mnem,435,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
+  qsort(Mnem,437,																sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
+//usare, e usare bsearch anche lì  qsort(Cond,sizeof(Cond)/sizeof(struct COND),	sizeof(Cond[0]),(int (*)(const void *, const void *))subCmpCond);
+//  qsort(Reg,sizeof(Reg)/sizeof(struct REGS),		sizeof(Reg[0]),(int (*)(const void *, const void *))subCmpReg);
+//  qsort(MCom,sizeof(MCom)/sizeof(struct MY_CODE),sizeof(MCom[0]),(int (*)(const void *, const void *))subCmpMyCode);
+//  qsort(Operandi,sizeof(Operandi)/sizeof(struct OPERANDO),sizeof(Operandi[0]),(int (*)(const void *, const void *))subCmpOper);
 #endif  
   _strdate(__date__);
   t=__date__[3];
@@ -196,22 +229,23 @@ int PROCInit() {
 		v.seg=0;
 		v.v=1;
 #if ARCHI
-    PROCDclVar("ARCHIMEDES",v,1,0);
+    PROCDclVar("ARCHIMEDES",v,VAR_NUMBER,0);
 #elif Z80
-    PROCDclVar("Z80",v,1,0);
+    PROCDclVar("Z80",v,VAR_NUMBER,0);
 #elif _6502
-    PROCDclVar("_6502",v,1,0);
+    PROCDclVar("_6502",v,VAR_NUMBER,0);
 #elif I8051
-    PROCDclVar("I8051",v,1,0);
+    PROCDclVar("I8051",v,VAR_NUMBER,0);
 #elif ST62
-    PROCDclVar("ST62",v,1,0);
+    PROCDclVar("ST62",v,VAR_NUMBER,0);
 #elif PIC==16
-    PROCDclVar("PIC16",v,1,0);
+    PROCDclVar("PIC16",v,VAR_NUMBER,0);
 #elif PIC==18
-    PROCDclVar("PIC18",v,1,0);
+    PROCDclVar("PIC18",v,VAR_NUMBER,0);
 #elif GD24032
-    PROCDclVar("GD24032",v,1,0);
+    PROCDclVar("GD24032",v,VAR_NUMBER,0);
 #elif I8086
+    PROCDclVar("I8086",v,VAR_NUMBER,0);
 #endif
     }
 #if ARCHI
@@ -252,6 +286,15 @@ int main(int argc, char **argv) {
         case 'h':
 				  goto print_init;
           break;
+        case 'A':
+          switch(*(argv[i]+2)) {
+            case 'T':
+		          CreaHex=CreaBin=TRUE;		
+							break;
+            default:
+              goto ukswitch;
+						}
+          break;
         case 'b':
           BranchOpt |= 2;
           break;
@@ -261,34 +304,55 @@ int main(int argc, char **argv) {
         case 'd':
           debug=2;
           break;
+        case 'C':
+          switch(*(argv[i]+2)) {
+		        case 'u':		// 
+              IgnoreCase=2;
+		          break;
+            default:
+              goto ukswitch;
+            }
+          break;
         case 'D':
           p=strchr(argv[i],'=');
           if(p) {
 						struct SEGMENTED_VALUE d;
+						char l,*p2;
             strncpy(buffer,argv[i]+2,p-argv[i]-2);
 						buffer[p-argv[i]-2]=0;
-						p++;
-						if(*p=='\"') {
-							p++;
-							d.v=*p;
-							}
-// gestire stringhe, char!!! come MASM...
-						else if(*p=='\'') {
-							p++;
-							d.v=*p;
-							}
-						else
-							d.v=atol(p);
-
 						d.seg=0;
-            PROCDclVar(buffer,d,1,0);
+						p++;
+						if(*p=='\"') {		// da DEBUG di MSDEV spariscono le virgolette!!! diofa
+							l=*p++;
+							if(p2=strchr(p,l))
+								*p2=0;
+is_string:
+							d.v=(int)p;
+		          PROCDclVar(buffer,d,VAR_STRING,0);
+							}
+						else if(*p=='\'') {
+							d.v=(int)FNGetASCII(p);
+		          PROCDclVar(buffer,d,VAR_NUMBER,0);
+							}
+						else {
+							if(isdigit(*p)) {
+								d.v=atol(p);
+								PROCDclVar(buffer,d,VAR_NUMBER,0);
+								}
+							else
+								goto is_string;				//...per cui faccio così, ma se inizia con numero non va!
+							}
+
             }   
+          else			// nsomma :)
+            goto ukswitch;
           break;
         case 'E':
           CreaElf = 1;		// ELF
+					// è Generate first pass listing su MASM 6...
           break;
         case 'e':
-          CreaElf = 2;		// MS OBJ / COFF
+          CreaElf = 2;		// MS OBJ / COFF; anche /coff
           break;
         case 'F':
           switch(*(argv[i]+2)) {
@@ -297,11 +361,17 @@ int main(int argc, char **argv) {
               OutVars=TRUE;
 		          OutCycle=TRUE;
               break;
+		        case 'l':		// 
+				      OutList=2;
+		          break;
+            case 'e':
+              OutErr=1;
+		          break;
             default:
               goto ukswitch;
             }
           break;
-        case 'l':
+        case 'l':		// /Fl in MASM 6...
           OutList=2;
           OutVars=TRUE;
           break;
@@ -312,9 +382,9 @@ int main(int argc, char **argv) {
           CreaHex=TRUE;
           break;
         case 'O':
-          CreaHex=CreaBin=TRUE;
+          CreaHex=CreaBin=TRUE;		// anche /AT
           break;
-        case 'M':
+        case 'M':			// anche /Cu = all upper case
           switch(*(argv[i]+2)) {
             case 'l':
               IgnoreCase=0;
@@ -324,6 +394,37 @@ int main(int argc, char **argv) {
               break;
             case 'u':
               IgnoreCase=2;
+							break;
+            default:
+              goto ukswitch;
+            }
+          break;
+        case 'S':
+          switch(*(argv[i]+2)) {			// MASM 6
+            case 'a':
+              // include all source lines
+              break;
+            case 'c':
+              // list instruction timings
+		          OutCycle=TRUE;
+              break;
+            case 'u':
+              // list generated instructions
+							break;
+            case 'x':
+              // list false conditionals
+							break;
+            case 'n':
+              // generate symbol table
+							break;
+            case 's':
+              // subtitle name
+							break;
+            case 'p':
+              LineLength=atoi(argv[i]+3);		// page length
+							break;
+            case 'l':
+              PageLength=atoi(argv[i]+3);  // page width
 							break;
             default:
               goto ukswitch;
@@ -360,6 +461,15 @@ int main(int argc, char **argv) {
               goto ukswitch;
             }
           break;
+        case 'Z':          // Zf make all symbols public
+          switch(*(argv[i]+2)) {			// 
+            case 'f':
+							AllPublics=TRUE;
+							break;
+            default:
+              goto ukswitch;
+            }
+          break;
         default:
 ukswitch:
           PROCWarn(4002,argv[i]+1);
@@ -387,7 +497,8 @@ print_init:
 		puts("            /b ... consente estensione salti relativi");
 		puts("            /D<variabile> ... definisce la variabile");
 		puts("            /R[k|z|i] ... assegna nomi ai segmenti CONST, BSS, ISR");
-		puts("            /i ... genera file listing sorgente/lm");
+		puts("            /l,/Fl ... genera file listing sorgente/lm");
+		puts("            /Fe ... genera file errori/lm");
 		puts("            /Fc ... come sopra, compresi i cicli di durata delle istruzioni");
 		puts("            /Ml ... considera i nomi case-sensitive");
 		puts("            /Mx ... considera i nomi case-insensitive");
@@ -398,6 +509,8 @@ print_init:
 		puts("            /x ... crea un file cross-reference");
 		puts("            /L ... crea un file HEX (monosegmento) anziche' un file oggetto");
 		puts("            /O ... crea un file BIN (v. HEX)");
+		puts("            /E ... crea un file ELF");
+		puts("            /e ... crea un file OBJ (COFF)");
 		puts("            /z ... mostra l'istruzione che causa un errore");
 		puts("            /h,/? ... help");
 		puts("Errorlevel: 0=OK, 1=Errore esecuzione, 2=Errore comandi,");
@@ -420,7 +533,8 @@ print_init:
   PROCInit();
   
   PROCOut1(";");
-  UNDEFD=FALSE;
+  for(i=0; i<MAX_DEFS; i++)
+		UNDEFD[i]=FALSE;
 
 	if(CreaElf && CreaHex)
     PROCError(4002,"opzioni incompatibili: ELF e HEX/BIN");
@@ -454,21 +568,30 @@ print_init:
       PROCError(1037,ffc);
     fprintf(FMap,"*** Generated by G.Dar assembler v%u.%02u on %s %s\n\n",__VER__ / 256,__VER__ & 255,__date__,__time__);
     }
+  if(OutErr) {
+    strcpy(ffc,OUS);
+    AddExt(ffc,"err");
+    if(!(FErr=fopen(ffc,"w"))) 
+      PROCError(1037,ffc);
+	  fprintf(FErr,"%s - %s\n",__date__,NFS);
+    }
     
   CPass=0;  
   while(CPass<2) {
     fprintf(stderr,"Fase %d...\n",CPass);
+		if(FErr)
+	    fprintf(FErr,"\nFase %d...\n",CPass);
     if(FIn)
 			fseek(FIn,0l,SEEK_SET);
 		if(!CPass) {
 			for(i=0; i<MAX_SEGS; i++) {
-				Seg[i].BaseAddr==0xffffffff;
-				Seg[i].CurAddr = 0;
+				Seg[i].BaseAddr=0xffffffff;
+				Seg[i].CurAddr = Seg[i].MaxAddr = 0;
 				}
 			}
 		else {
 			for(i=0; i<MAX_SEGS; i++) {
-				Seg[i].CurAddr = Seg[i].BaseAddr==0xffffffff ? 0 : Seg[i].BaseAddr;
+				Seg[i].CurAddr = /*Seg[i].MaxAddr = */Seg[i].BaseAddr==0xffffffff ? 0 : Seg[i].BaseAddr;
 				}
 			}
 		root=RootMacro;
@@ -477,21 +600,29 @@ print_init:
 			root=root->next;
 			}
 	  DefCSeg=DefDSeg=CurSeg=SEG_UNDEFINED;
-	  CurProc=0;
+		for(i=0; i<MAX_NESTED_PROC; i++)
+		  CurProc[i]=NULL;
 //	  __line__=1;
 		if(CPass) {
 			j=-1;
 			LastAddress=0;
 			for(i=0; i<Segs; i++) {
-				if(Seg[i].type == SEGMENT_VIRT) 
-					continue;
 				if(j == -1) {
 					j=i;
 			    if(CreaElf==1) {
 						// qua bisognerebbe vedere come fare con _abs/extern
 						Seg[j].lpos=sizeof(ELF_HEADER)+sizeof(ELF_PROGRAM_HEADER)*(Segs);
-						Seg[j].lposReloc=Seg[j].lpos+Seg[j].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							}
+						else {
+							if(Seg[j].BaseAddr == 0xffffffff)
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							else
+								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct ELF_REL);
+						// sbagliato, sistemare, trovare
 						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct ELF_REL);
 						Seg[j].numReloc=0;
 						LastAddress=max(LastAddress,Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL));
@@ -499,15 +630,32 @@ print_init:
 			    else if(CreaElf==2) {
 						// qua bisognerebbe vedere come fare con _abs/extern
 						Seg[j].lpos=sizeof(COFF_HEADER)+sizeof(COFF_SECTION_TABLE)*(Segs);
-						Seg[j].lposReloc=Seg[j].lpos+Seg[j].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							}
+						else {
+							if(Seg[j].BaseAddr == 0xffffffff)
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							else
+								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct COFF_RELOCATIONS);
+						// ovv sbagliato, sistemare, trovare
 						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct COFF_RELOCATIONS);
 						Seg[j].numReloc=0;
 						LastAddress=max(LastAddress,Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS));
 						}
 					else {
 						Seg[j].lpos=sizeof(OBJ_HEADER)+sizeof(OBJ_SEG_DEF)*(Segs);
-						Seg[j].lposReloc=Seg[j].lpos+Seg[j].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							}
+						else {
+							if(Seg[j].BaseAddr == 0xffffffff)
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							else
+								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct OBJ_RELOC);
 						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct OBJ_RELOC);
 						Seg[j].numReloc=0;
@@ -518,24 +666,44 @@ print_init:
 					}
 				else {
 			    if(CreaElf==1) {
-						Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL);		// ovvero LastAddress..
-						Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL);		// ovvero LastAddress..
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							}
+						else {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL);
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct ELF_REL);
+						// sbagliato, sistemare, trovare
 						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct ELF_REL);
 						Seg[i].numReloc=0;
 						LastAddress=max(LastAddress,Seg[i].lposExt+Seg[i].numExt*sizeof(struct ELF_REL));
 						}
 			    else if(CreaElf==2) {
-						Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS);		// ovvero LastAddress..
-						Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS);		// ovvero LastAddress..
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							}
+						else {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS);
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct COFF_RELOCATIONS);
+						// ovv sbagliato, sistemare, trovare
 						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct COFF_RELOCATIONS);
 						Seg[i].numReloc=0;
 						LastAddress=max(LastAddress,Seg[i].lposExt+Seg[i].numExt*sizeof(struct COFF_RELOCATIONS));
 						}
 					else {
-						Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct OBJ_RELOC);		// ovvero LastAddress..
-						Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
+						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct OBJ_RELOC);		// ovvero LastAddress..
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							}
+						else {
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct OBJ_RELOC);
+							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct OBJ_RELOC);
 						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct OBJ_RELOC);
 						Seg[i].numReloc=0;
@@ -551,15 +719,15 @@ print_init:
     FNLeggiFile(NFS,FObj,0);
     if(IfDefs)
       PROCError(1004);
-    if(CurProc)
-      PROCError(2100);
+    if(CurProcLevel>0 || CurProc[0])
+      PROCError(2100,CurProc[0]->name);
     if(!(CreaBin || CreaHex) && CurSeg != SEG_UNDEFINED)
 			if(!CPass)
 				PROCWarn(2100,"manca ENDS");
     PROCOut(OUT_END);
 	  if(!CPass) {
-			for(i=0; i<MAX_SEGS; i++) {
-				uint64_t cur2=Seg[i].CurAddr;
+			for(i=0; i<Segs; i++) {
+				uint64_t cur2=Seg[i].MaxAddr;
 				if(cur2 == 0 && Seg[i].BaseAddr!=0xffffffff && Seg[i].BaseAddr!=0)
 					cur2=0x100000000;		// patch se ho fatto il giro :) 8086
 				Seg[i].len=cur2/* rimesso 2025! controllare ELF ecc*/ - (Seg[i].BaseAddr != 0xffffffff ? Seg[i].BaseAddr : 0);
@@ -582,18 +750,18 @@ print_init:
   if(CreaBin) {
 		FILE *FBin;
 		uint8_t *h;
-		uint32_t bsize=0;
+		uint32_t bsize=0,saddress=0;
 	  AddExt(OUS,"hex");
 	  if(!(FObj=fopen(OUS,"r"))) 
 	    PROCError(1038,"file HEX non trovato" /*OUS*/);
-		h=convertHEX2BIN(FObj,&bsize);
+		h=convertHEX2BIN(FObj,&bsize,&saddress);
 		fclose(FObj);
 		remove(OUS);
 		AddExt(OUS,"bin");
 		if(h) {
 			if(!(FBin=fopen(OUS,"wb"))) 
 				PROCError(1038,OUS);
-			fwrite(h,1,bsize,FBin);
+			fwrite(h+saddress,1,bsize,FBin);
 			fclose(FBin);
 	    fprintf(stderr,"File binario %s scritto.\n",OUS);
 			free(h);
@@ -608,6 +776,7 @@ print_init:
 	fputc('\n',stderr);
 
 	Libera(Var);
+	Libera2(StrTag);
 	while(RootDef) {
 		struct LINE_DEF *t=RootDef->next;
 		free(RootDef);
@@ -641,7 +810,13 @@ int FNLeggiFile(char *F, FILE *FO,uint8_t level) {
 	VarDeclared=FALSE;
   do {
 
+		if(__line__==2482) {
+//				printf("BREAK a %u\n",__line__);
+				}
 		if(inMacroExecuting) {
+			char myBuf[256];
+//skip_macro_line:
+
 			p=strchr(&theMacro[theMacroPtr],'\n');
 			if(p)
 				*p=0;
@@ -649,17 +824,39 @@ int FNLeggiFile(char *F, FILE *FO,uint8_t level) {
 			if(p)
 				*p=' ';
 			strcpy(theLine,&theMacro[theMacroPtr]);
-			if(*theLine)
+
+			if(OutMacro) {
+				PROCOut1(theLine,"\n",2,FALSE);
+//				PROCOut1("\n",0,2,FALSE);
+				}
+
+			if(*theLine) {
 				theMacroPtr += strlen(theLine)+1;
-			else
-				inMacroExecuting=0;
-			if(stristr(theLine,"exitm"))			// non è perfetto ma ok
-				inMacroExecuting=0;
+				macroLineNumber++;
+				}
+			else {
+				inMacroExecuting=FALSE;
+				CurrMacro=NULL;
+				}
+			p=(char*)parse_parm(theLine,myBuf);
+			if(!stricmp(myBuf,"exitm")) {
+				inMacroExecuting=FALSE;
+				CurrMacro=NULL;
+				}
 			}
 		else {
-			if(!fgets(theLine,1023,FIn))
-				break;
-			__line__++;
+			if(!inLoop) {
+				memset(theLine,0,sizeof(theLine));		// serve pulire sia per EQU stringhe che per FNLO che può andare oltre lo 0 finale(sistemare...
+				if(!fgets(theLine,1023,FIn))
+					break;
+				__line__++;
+				}
+			else
+				inLoop--;
+			if(inWhile)
+				;
+			if(inFor)
+				;
 			}
 		theLinePtr=0;
 	  bInizioRiga=TRUE;
@@ -698,7 +895,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 //    LastStmt4Cycle=-1;
   if(!bInizioRiga)
     PROCError(2060);
-  if(UNDEFD)
+  if(UNDEFD[IfDefs])
     return FALSE;
   else {  
 	  op1=theLinePtr;
@@ -720,7 +917,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 				}
 			else
 				strcpy(T1,T);
-		  if(*T != '.' && !strcmp(T1,":") && !FNIsDirective(T1)) {
+		  if(*T != '.' && !strcmp(T1,":") && FNIsDirective(T1)<0) {
 			  FNLO(T1);                    // (confermo
 		    if(OutList) {                         
 		//    FNGetLine(TEXTP-strlen(T),MyBuf);
@@ -728,79 +925,311 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 		      }
 				l.v=-1;
 				l.seg=SEG_NONE;
-		    PROCDclVar(T,l,0,0);
+		    PROCDclVar(T,l,VAR_ADDRESS,0);
 		    }
 		  else {
-			  if(i=FNIsDirective(T1)) {
+			  if((i=FNIsDirective(T1))>=0) {
 	  op2=theLinePtr;
 			  FNLO(MyBuf);                    // (confermo
 			    switch(i) {
 			      case 0x1010:   // proc entry NO !
-			      case 0x1011:   // endp NO! non passa mai di qua! v. sotto
+			      case 0x1011:   // ( col cazzo, sì che ci passa 2025 (endp NO! non passa mai di qua! v. sotto
 			      case 0x0100:
 			        if(OutList) {                         
 			          PROCOut1("= ",theLine);
 			          }
-			        if(!CPass) {
-				        if(i==0x100) {		// EQU
-	//		    	      *MyBuf=0;
-		  		        l=FNEvalExpr(14,MyBuf);
-									if(!l.valid)
-										PROCError(2062);
-									if(*T1=='=') {			// = può essere più volte!
-										VARS *v;
-										if(v=FNCercaVar(T,0,FALSE,CPass))
+				      if(i==0x100) {		// EQU
+//		    	      *MyBuf=0;
+								if(*FNLA(MyBuf)=='<')	{		// (stupido MASM) questo FORZA stringa! GD
+		if(__line__==529 || __line__==426) {
+//				printf("BREAK a %u\n",__line__);
+				}
+									PROCCheck('<');
+									FNLA(MyBuf);
+									if(*MyBuf=='\'') {
+										char *p;
+										theLine[theLinePtr]='\"';			// porcheria ma ok :)
+										if(p=strchr(&theLine[theLinePtr+1],'\'')) {
+											*p++='\"';
+											*p=0;
+											}
+										}
+									}
+		  		      l=FNEvalExpr(14,MyBuf);		// con 13 si incasina altrove... verificare... cmq stronco qua sopra!
+								if(!l.valid)
+									PROCError(2062);
+#pragma warning USARE l.t !! per costanti/var/stringhe
+								if(*T1=='=') {			// = può essere più volte!
+									VARS *v;
+									if(v=FNCercaVar(T,0,0,FALSE,CPass)) {
+										if(*MyBuf) {
+											v->size=strlen(MyBuf);
+											if(!(v->type & VAR_STRING)) {
+												v->value=(int)(char*)malloc(v->size);
+												}
+											else {
+												v->value=(int)(char*)realloc((void*)v->value,v->size);
+												}
+											v->type |= VAR_STRING;
+											strcpy((char*)v->value,MyBuf);
+											}
+										else {
+											if(v->type & VAR_STRING) {
+												free((void*)v->value);
+												v->type &= ~VAR_STRING;
+												}
 											v->value=l.v;
-										else
-											PROCDclVar(T,l,1,0);
+											}
+										}
+									else {
+										goto do_equ;
+										}
+									}
+								else {
+									if(CPass) {
+										gotoEOL();
+										return FALSE;
+										}
+do_equ:
+									if(*MyBuf) {
+										l.v=(int)&MyBuf;
+										PROCDclVar(T,l,VAR_STRING,0);
 										}
 									else
-										PROCDclVar(T,l,1,0);
-		  		        }
-				        else if((i & 0xff) == 0x10) {		//mmm /*4*/era 4 ... 2024??
-				          if(CurProc)
-				            PROCError(2100,T);
+										PROCDclVar(T,l,VAR_NUMBER,0);
+									}
+								if(*FNLA(MyBuf))			// stupido MASM
+									PROCCheck('>');	// ovvero semplicemente gotoEOL
+								return FALSE;
+		  		      }
+				      else if((i & 0xff) == 0x10) {
+				        if(CurProc[CurProcLevel])			// per ora
+				          PROCWarn(2109,T);
+//	    printf("PROC %u %s\n",__line__,T);
+								l.v=-1;
+				        CurProc[CurProcLevel++]=PROCDclVar(T,l,VAR_FUNZ | VAR_ADDRESS,0);
+								do {
 									FNLA(MyBuf);
-									l.v=-1;
 #if I8086
 									if(!stricmp(MyBuf,"FAR"))
-										l.seg=CurSeg;			// 
+										CurProc[CurProcLevel-1]->segm=CurSeg;			// 
 									else if(!stricmp(MyBuf,"NEAR"))
-										l.seg=CurSeg /*SEG_NONE*/;		// boh verificare
+										CurProc[CurProcLevel-1]->segm=CurSeg /*SEG_NONE*/;		// boh verificare
+									else
+#else
+									CurProc[CurProcLevel-1]->segm=CurSeg/*2025*/;
+#endif
+									/*else*/ if(!stricmp(MyBuf,"USES")) {
+										FNLO(MyBuf);
+										do {
+											FNLO(T1);
+											if(!(i=FNIsReg(T1)))
+												PROCError(2054,"registro");
+											i--;
+//											printf("uses %s (%X)\n",T1,i);
+#if Z80
+											if(!(i & 0x100))
+												PROCError(2062,T1);
+											i &= 0xff;
+											PROCOut(0xc5/*PUSH*/ | (Reg[i].m << 4));		//  VERIFICARE!
+#elif I8051
+											PROCOut(0xc8/*push*/,i);		//  VERIFICARE!
+#elif ST62
+											PROCOut(0xc8/*push*/,i);		//  VERIFICARE!
+#elif _6502
+											PROCOut(0x48/*PHA*/);		//  questo sempre cmq! VERIFICARE!
+											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											if(Reg[i].m==0)			// in teoria se poi uso PHP questo non serve, ma vabbè... (v. anche PLP
+												;
+											else if(Reg[i].m==1) {
+												PROCOut(0x8A/*TXA*/);		//  
+												PROCOut(0x48/*PHA*/);
+												}
+											else if(Reg[i].m==2)
+												PROCOut(0x98/*TYA*/);		//  
+												PROCOut(0x48/*PHA*/);
+												}
+											else if(Reg[i].m==4)
+												PROCOut(0x02/*PHP*/);
+												}
+											else 
+												PROCError(2062,T1);
+#elif PIC==16 || PIC==18
+											PROCOut(/*MOVWF-*/,i);		//  VERIFICARE! usare MOVWF-
+#elif GD24032
+											PROCOut(/*STMDB*/,i);		//  VERIFICARE! usare STMDB
+#elif I8086
+											if(!(i & 0x100))
+												PROCError(2062,T1);
+											i &= 0xff;
+											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											if(Reg[i].m>=8 && Reg[i].m<16)
+												PROCOut(0x50/*PUSH*/ | (Reg[i].m-8));		//  
+											else if(Reg[i].m>=16 && Reg[i].m<20)
+												PROCOut(0x6/*PUSH*/ | (Reg[i].m-16) << 3);		//  
+											else if(Reg[i].m>=32 && Reg[i].m<40) {
+												if(CPULevel<3)
+													PROCError(2067,T1);
+												else
+													;
+												}
+											else if(Reg[i].m>=40 && Reg[i].m<42) {
+												}
+											else 
+												PROCError(2062,T1);
+											sprintf(MyBuf,"> PUSH %s\n",T1);
+											PROCOut1(MyBuf);
+#endif
+
+											FNLA(MyBuf);
+											if(*MyBuf==',')
+												PROCCheck(',');
+											} while(*MyBuf);
+										}
+									else if(!stricmp(MyBuf,"PUBLIC")) {			// v. anche sopra
+										if(CreaHex) 
+											if(!CPass)
+												PROCWarn(1006,"Public");		// ovvio! idem ma diciamo che può rimanere, non come extrn
+										LVars->type |= VAR_PUBLIC;
+										if(!(LVars->type & VAR_PUBLIC_DEFINED)) {
+											LVars->type |= VAR_PUBLIC_DEFINED;
+											subOut(OUT_VAR_EXT,0);
+											}
+										}
 									else if(*MyBuf)
 										PROCError(1006,MyBuf);
-#else
-									l.seg=CurSeg/*2025*/;
-#endif
-				          CurProc=PROCDclVar(T,l,VAR_FUNZ,0);
+									FNLO(MyBuf);
+									} while(*MyBuf);
 #if I8086
-									if(!stricmp(MyBuf,"FAR")) 
-										LVars->size += 2;		// da 16 a 32 bit cmq :)
+								if(!stricmp(MyBuf,"FAR")) {
+									if(CPULevel<3) {
+										LVars->size = 4;		// da 16 a 32 bit
+										}
+									else {
+										LVars->size = 6;		// da 16+16 a 16+32 bit 
+										}
+									}
 #endif
-				          }
-				        else if((i & 0xff) == 0x11 /*5*/) {		// idem
-				          if(IgnoreCase)
-				            strupr(T);
-	//			          printf("cproc: %Fs\n",CurProc->label);  
-				          if(!strcmp(T,CurProc->label)) {
-					          CurProc->dim=Seg[CurSeg-1].CurAddr-CurProc->value;
-				            CurProc=0;
-				            }          
-				          else 
-				            PROCError(2108,T);
-				          }       
-							  FNLO(MyBuf);                    // (confermo
 				        }
-				      else                             // vado a fine riga
-				        gotoEOL()   /*while(*FNLO(MyBuf))*/
-									;
+				      else if((i & 0xff) == 0x11) {		// idem
+								if(!CurProc[CurProcLevel-1])
+									PROCError(2108);
+								CurProcLevel--;
+				        if(IgnoreCase)
+				          strupr(T);
+//			          printf("cproc: %Fs\n",CurProc->label);  
+//	    printf("ENDP %u %s\n",__line__,T);
+				        if(!strcmp(T,CurProc[CurProcLevel]->name)) {
+
+									if(CurProc[CurProcLevel]->localUsed>0) {
+#if Z80
+										PROCOut(0xFDE3/*ex  (sp),iy*/);
+										sprintf(MyBuf,"> EX  (SP),IY\n");
+										PROCOut1(MyBuf);
+#elif I8051
+#elif ST62
+#elif _6502
+#elif PIC==16 || PIC==18
+#elif GD24032
+										PROCOut(/*LEAVE*/);
+										sprintf(MyBuf,"> LEAVE\n");
+										PROCOut1(MyBuf);
+#elif I8086
+										PROCOut(0xc9/*LEAVE*/);
+										sprintf(MyBuf,"> LEAVE\n");
+										PROCOut1(MyBuf);
+#endif
+										}
+									for(i=0; i<32; i++) {			// v. anche sopra
+										if(CurProc[CurProcLevel]->regsSaved & (1 << i)) {
+#if Z80
+											PROCOut(0xc1/*POP*/ | (Reg[i].m << 4));		//  VERIFICARE!
+#elif I8051
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
+#elif ST62
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
+#elif _6502
+											if(i==0)
+												;
+											else if(Reg[i].m==1) {
+												PROCOut(0x68/*PLA*/);
+												PROCOut(0xAA/*TAX*/);		//  
+												}
+											else if(Reg[i].m==2)
+												PROCOut(0x68/*PLA*/);
+												PROCOut(0xA8/*TAY*/);		//  
+												}
+											else if(Reg[i].m==4)
+												PROCOut(0x12/*PLP*/);		// v. nota sopra PHP
+												}
+											else 
+												PROCError(2062,T1);
+											if(i)			// questo cmq, alla fine direi!
+												PROCOut(0x68/*PLA*/);
+#elif PIC==16 || PIC==18
+											PROCOut(/*MOVFW*/,i);		//  VERIFICARE! usare MOVFW+
+#elif GD24032
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE! usare LDMIA
+#elif I8086
+											if(i>=8 && i<16)
+												PROCOut(0x58/*POP*/ | (i-8));		//  
+											else if(i>=16 && i<20)
+												PROCOut(0x7/*POP*/ | ((i-16) << 3));		//  
+											else if(i<28)
+												;
+											sprintf(MyBuf,"> POP %s\n","");
+											PROCOut1(MyBuf);
+#endif
+											}
+										}
+
+					        CurProc[CurProcLevel]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel]->value;
+				          CurProc[CurProcLevel]=NULL;
+				          }          
+				        else 
+				          PROCError(2108,T);
+				        }       
+//							  FNLO(MyBuf);                    // (confermo
+			        break;
+			      case 0x0103:			// TEXTEQU, SEMPRE stringa!
+			        if(!CPass) {
+	//		    	      *MyBuf=0;
+								if(*FNLA(MyBuf)=='<')	{		// literal dunque
+									PROCCheck('<');
+									i=0;
+									while(theLine[theLinePtr] && theLine[theLinePtr]!='>') {
+										T1[i++]=theLine[theLinePtr++];
+										}
+									T1[i]=0;
+									PROCCheck('>');
+									l.v=(int)T1;
+									}
+								else {
+		  						l=FNEvalExpr(14,MyBuf);
+									if(!l.valid)
+										PROCError(2062);
+									if(*MyBuf) {
+										l.v=(int)&MyBuf;
+										}
+									else {
+										l.v=(int)&MyBuf;
+										}
+									}
+								PROCDclVar(T,l,VAR_STRING,0);
+								if(*FNLA(MyBuf))			// idem
+									PROCCheck('>');	// ovvero semplicemente gotoEOL
+	  		        }
+							else {                            // vado a fine riga
+				        gotoEOL();
+								return FALSE;
+								}
 			        break;
 			      case 0x4100:			// STRUC
 			      case 0x4101:			// UNION
 							if(isasym(*T)) {
 								if(!inStructDeclaration) {
 								  if(!CPass)
-										if(FNCercaAggr(T,FALSE,0))
+										if(FNCercaAggr(T,0,0))
 											PROCError(2086,T);
 									currVarTag=(uint32_t)PROCDclAggr(T,i==0x4100 ? VAR_STRUCT : VAR_UNION,0,0);
 									inStructDeclaration=1;
@@ -820,7 +1249,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 								int n;
 								uint8_t go=0;
 
-								currVarTag=(uint32_t)PROCDclAggr(T,VAR_RECORD,0,0);
+								currVarTag=(uint32_t)PROCDclAggr(T,VAR_RECORD | VAR_ADDRESS,0,0);
 								do {
 									FNLO(MyBuf);                    
 									if(!CPass) {
@@ -828,7 +1257,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 										}
 
 									PROCCheck(':');
-									o1.l=FNEvalExpr(14,myBuf1);
+									o1.l=FNEvalExpr(13,myBuf1);			// per gestire = ...
 									if(!o1.l.valid)
 										PROCError(2062);
 									n=o1.l.v;
@@ -863,7 +1292,6 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 													PROCWarn(2058);
 													myT->value = getMask(myT->size);		// tronco al max!
 													}
-												((struct TAGS*)currVarTag)->value=FNUpdAggr((struct TAGS*)currVarTag);
 												}
 											if(!*FNLA(myBuf1)) {
 												go=TRUE;
@@ -882,6 +1310,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 											PROCError(2062);
 											break;
 										}
+									((struct TAGS*)currVarTag)->value=FNUpdAggr((struct TAGS*)currVarTag);
 									} while(!go);
 
 								currVarTag=0;
@@ -893,13 +1322,19 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 								FNIsStmt(T);
 
 			        break;
+			      case 0x4000:			// MACRO (sia prima che dopo...
+			      case 0x4002:			// ENDM
+	theLinePtr=op2;
+								FNIsStmt(T);
+
+			        break;
 			      default:
 							if(isasym(*T)) {
 								if(!inStructDeclaration) {
 									if(stricmp(MyBuf,"SEGMENT")) {			// caso particolare... altri??
 										l.v=-1;
 										l.seg=SEG_NONE;
-										PROCDclVar(T,l,0,0);
+										PROCDclVar(T,l,VAR_ADDRESS,0);
 										}
 									}
 								else {
@@ -930,7 +1365,7 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 			      PROCDclVar(T,-1l,0,0);
 			    else*/
 
-					if(isasym(*T) && (myT=FNCercaAggr(FNLA(T1),FALSE,0))) {		// se tipo user-definito, struc/record
+					if(isasym(*T) && (myT=FNCercaAggr(FNLA(T1),0,0))) {		// se tipo user-definito, struc/record
 						uint16_t n;
 						char myBuf1[256];
 
@@ -939,9 +1374,11 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 						if(myT->type & (VAR_STRUCT | VAR_UNION)) {
 								l.valid=0;
 								l.v=-1;
-								PROCDclVar(T,l,myT->type,(uint32_t)myT);
-								l.valid=0;
+								PROCDclVar(T,l,myT->type | VAR_ADDRESS,(uint32_t)myT);
+								l.valid=1;
 								l.v=0;
+								l.seg=SEG_NONE;
+								l.t=0;
 								PROCOut1("- ",theLine,FALSE);
 								FNLA(myBuf1);
   							switch(*myBuf1) {
@@ -1013,16 +1450,15 @@ int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
 							if(!CPass) {
 								l.valid=0;
 								l.v=-1;
-								PROCDclVar(T,l,VAR_RECORD,(uint32_t)myT);
-								while(*FNLO(myBuf1))
-									;
+								PROCDclVar(T,l,VAR_RECORD | VAR_ADDRESS,(uint32_t)myT);
+								gotoEOL();
+								return FALSE;
 								}
 							else {
 								l.valid=0;
 								l.v=0;
 								PROCOut1("- ",theLine,FALSE);
 								FNInitAggr(myT,TRUE);
-
 								}
 							}
 						}
@@ -1058,7 +1494,8 @@ int subStmt(const char *s,enum ADDR_MODE m,struct CODE **n) {
   return -1;
   }
      
-int subBranch(const char *TS, const char *T2S, struct CODE *mn, int T, int k, struct SEGMENTED_VALUE l2, uint8_t c) {
+int subBranch(const char *TS, const char *T2S, struct CODE *mn, int T, int k, struct SEGMENTED_VALUE l2, uint8_t c, uint8_t forcedSize=0);
+int subBranch(const char *TS, const char *T2S, struct CODE *mn, int T, int k, struct SEGMENTED_VALUE l2, uint8_t c, uint8_t forcedSize) {
   long l;
   int i;
 
@@ -1135,11 +1572,11 @@ normBranch:
     PROCOut(mn->a[k].n ^ (c ? 0x20 : 0),LOBYTE(LOWORD(l)),-1,0);
 #elif I8051
   if(i==21 || i==22)
-    PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));   // con segm
+    PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)),l2.seg);   // con segm
   else if(i==0 || i==3) {
-    if(LOBYTE(LOWORD(l2)) & 0xf8)
+    if(LOBYTE(LOWORD(l2.v)) & 0xf8)
       PROCError(2064);
-    PROCOut(mn->a[k].n | ((*(((char *)&l2)+1) & 0x7) << 5),LOBYTE(LOWORD(l2)),-1,HIWORD(l2));   // con segm
+    PROCOut(mn->a[k].n | ((HIBYTE(LOWORD(l2.v)) & 0x7) << 5),LOBYTE(LOWORD(l2.v)),-1,l2.v);   // con segm
     }
 #elif ST62
   if(i==15 || i==16) {      // JRR, JRS, salta su val.reg.
@@ -1150,7 +1587,7 @@ normBranch:
 //    PROCOut(mn->a[k].n,l2 & 255,*(((char *)&l2)+1) & 0xff,HIWORD(l2));   // con segm
     }
   else if(i==11 || i==4) {
-    PROCOut(mn->a[k].n | ((l2 & 0xf) << 4),((l2 >> 4) & 0xf) | (*(((char *)&l2)+1) & 0xf) << 4,-1,HIWORD(l2));   // con segm
+    PROCOut(mn->a[k].n | ((l2.v & 0xf) << 4),((l2.v >> 4) & 0xf) | (HIBYTE(LOWORD(l2.v)) & 0xf) << 4,-1,l2.seg);   // con segm
     }
   else {
     l=(int16_t)(*((int16_t *)&l2)-Seg[CurSeg-1].CurAddr-1);
@@ -1158,7 +1595,7 @@ normBranch:
     if(l > 15 || l < -16) {
       if(BranchOpt) {
         PROCOut((mn->a[k].n ^ 4) | (2 << 3),-1,-1,HIBYTE(LOWORD(l)));   // con segm
-        PROCOut(0x9 | ((l2 & 0xf) << 4),((l2 >> 4) & 0xf) | (*(((char *)&l2)+1) & 0xf) << 4,-1,HIWORD(l2));   // con segm
+        PROCOut(0x9 | ((l2.v & 0xf) << 4),((l2.v >> 4) & 0xf) | (HIBYTE(LOWORD(l2.v)) & 0xf) << 4,-1,l2.seg);   // con segm
         PROCWarn(4011,T2S);
         }
       else
@@ -1259,7 +1696,7 @@ normBranch:
 #elif I8086
   if(i == 190/*JCXZ*/ || (i == 212/*LOOP*/ && CPULevel>=3)) {                   // gestisco Jcc cond,...		VERIFICARE Loop 386?
 
-	  if(CPass && i==27 && (BranchOpt & 1)) {      // solo C, NC, Z, NZ
+	  if(CPass && (BranchOpt & 1)) {      // 
 
 //			VERIFICARE CPass come in 6502!!
 			// FINIRE QUA!
@@ -1268,45 +1705,86 @@ normBranch:
       if(l <= 127 && l>=-128) {          // jmp 00xx diventa jmp xx \\ nop VERIFICARE 8086
 		    PROCWarn(4010,T2S);
 //		    printf("c vale %d, cond %x\n",c,Cond[T].m);
-        PROCOut(c ? (0x70 | Cond[T].m) : 0xeb/*jmp short*/,LOBYTE(LOWORD(l)));
+        PROCOut(c ? (mn->a[k].n ^ Cond[T].m) : 0xe9/*jmp int16*/,LOBYTE(LOWORD(l)));
         }
       else
         goto normBranch;
 	    }
 	  else {
 normBranch:
-      PROCOut(mn->a[k].n | (c ? Cond[T].m : 0),LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)));   // 
+      l=(int16_t)(*((int16_t *)&l2)-Seg[CurSeg-1].CurAddr-2);
+			if(i==190)
+				PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)) /*,HIBYTE(LOWORD(l2.v))*/);   // 
+			else
+				goto do_loop;
       }
        
     }
   else {
     l=(int16_t)(*((int16_t *)&l2)-Seg[CurSeg-1].CurAddr-2);
 //	    printf("ofs salto %lx\n",l2);
-    if(c) {			// se Jcc, solo +-127 max
+    if(i == 212) {			// se Loop[c], solo +-127 max
+			if(l > 127 || l<-128) {
+				PROCError(2063,T2S);
+				}
+			else {
+do_loop:
+				if(c) {
+					if(Cond[T].m == 4)
+				    PROCOut(0xE0 /*mn->a[k].n*/,LOBYTE(LOWORD(l)));
+					else if(Cond[T].m == 5)
+				    PROCOut(0xE1 /*mn->a[k].n*/,LOBYTE(LOWORD(l)));
+					else
+						PROCError(2062,T2S);
+					}
+				else
+			    PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)));
+				}
+      }
+    else if(c) {			// se Jcc, solo +-127 max
 			if(l > 127 || l<-128) {
 				if((BranchOpt & 2) && i!=212 /* no LOOP */) {
 					if(c)
 						PROCOut(mn->a[k].n | (c ? Cond[T ^ 1].m : 0),3,-1,0);
-					PROCOut(0xe9 /*JMP*/,LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)));   //
+					PROCOut(0xe9 /*JMP int16*/,LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)));   //
 					Seg[CurSeg-1].len+=3;		// necessario xche al primo giro non c'era
 					PROCWarn(4011,T2S);		// TS?? v. 6502 verificare
 					}
 				else
 					PROCError(2063,T2S);
 				}
-	    else
+			else {
 		    PROCOut(mn->a[k].n | (c ? Cond[T].m : 0),LOBYTE(LOWORD(l)));
+				}
       }
 		else {
-			if(i==191 && l <= 127 && l>=-128) {
-		    PROCOut(0xeb /*??? boh pare ok mn->a[k].n perché cmq il parm è relativo */,LOBYTE(LOWORD(l)),-1,0);
-				}
-			else if(l <= 32767 && l>=-32768) {
-				l--;		// se jmp short mi sposto di 2 oltre CurAddr, se no di 3!
-		    PROCOut(mn->a[k].n /*0xe9 /*mn->a[k].n perché cmq il parm è relativo */,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),0);
+			if(forcedSize==1) {
+				if(i==191) {
+					if(l <= 127 && l>=-128) {		
+				    PROCOut(0xeb /*??? boh pare ok mn->a[k].n perché cmq il parm è relativo */,LOBYTE(LOWORD(l)),-1,0);
+						}
+					else
+						PROCError(2063);
+					}
+				else
+					PROCError(2062);
 				}
 			else {
-		    PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)),LOBYTE(HIWORD(l2.v)));			// finire con jmp FAR
+				if(i==191 && l <= 127 && l>=-128) {		// si crea il problema in 2° pass ... SISTEMARE!
+					if(!CPass) {
+						PROCOut(mn->a[k].n /*0xe9 */,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),0); // per ora faccio...
+						}
+					else {
+						PROCOut(0xeb,LOBYTE(LOWORD(l)),0x90 /*NOP*/,0);	//...così! non è il massimo ma ok
+						}
+					}
+				else if(l <= 32767 && l>=-32768) {
+					l--;		// se jmp short mi sposto di 2 oltre CurAddr, se no di 3!
+					PROCOut(mn->a[k].n /*0xe9 /*mn->a[k].n perché cmq il parm è relativo */,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),0);
+					}
+				else {
+					PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2.v)),HIBYTE(LOWORD(l2.v)),LOBYTE(HIWORD(l2.v)));			// finire con jmp FAR
+					}
 				}
       }
     }
@@ -1320,7 +1798,7 @@ int subBytes(const char *s, int m, uint64_t l) {
   char myBuf[256],ch;
 
   if(*s == '\'' || *s == '\"') {
-    if(!(m & 0xf0) && (m & 0xf ) != 1)	// la stringa OK solo per byte e string/ascii
+    if(!(m & 0xf0) && (m & 0xf) != 1)	// la stringa OK solo per byte e string/ascii
       PROCError(2064);
     j=1;
     do {
@@ -1349,6 +1827,12 @@ int subBytes(const char *s, int m, uint64_t l) {
 					case 'x':
 						ch=asc2hex(MAKEWORD(s[j+1],s[j+2]));
 						j+=2;
+						break;
+					case '\"':
+						ch='\"';
+						break;
+					case '\'':
+						ch='\'';
 						break;
 					default:
 						ch=s[j];
@@ -1379,7 +1863,9 @@ int subBytes(const char *s, int m, uint64_t l) {
 		ll.seg=HIWORD(l);
 #endif
     n=m;
-		if(Seg[CurSeg-1].type != SEGMENT_VIRT) {
+		if(Seg[CurSeg-1].BaseAddr == 0xffffffff)		// questo serve se non c'è stata ORG dopo SEGMENT/CSEG
+			Seg[CurSeg-1].BaseAddr=Seg[CurSeg-1].CurAddr;
+		if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
 			switch(m) {
 				case 0:                         // gestisco LABEL
 					break;
@@ -1430,8 +1916,6 @@ int subBytes(const char *s, int m, uint64_t l) {
     		}
 			}
 		else {
-			if(Seg[CurSeg-1].BaseAddr == 0xffffffff)		// questo serve se non c'è stata ORG dopo SEGMENT/CSEG
-				Seg[CurSeg-1].BaseAddr=Seg[CurSeg-1].CurAddr;
 			switch(m) {
 				case 0:                         // gestisco LABEL
 					break;
@@ -1440,10 +1924,12 @@ int subBytes(const char *s, int m, uint64_t l) {
     		case 4:
     		case 8:
 				  Seg[CurSeg-1].CurAddr+=m;
+					Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
 					break;
 				case 0x10:                    // ds
 					n=LODWORD(l);
 				  Seg[CurSeg-1].CurAddr+=n;
+					Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
 					break;
     		}
    		}
@@ -1512,10 +1998,10 @@ int subCmpMnem(struct CODE *s1, struct CODE *s2) {
 		else
 			goto norm;
 		}
-	else if(toupper(*s1->s)=='L' && toupper(*(s1->s+1))=='O' && toupper(*(s1->s+2))=='O' && toupper(*(s1->s+3))=='P') {		//		LOOP 286
+	else if(toupper(*s1->s)=='L' && toupper(*(s1->s+1))=='O' && toupper(*(s1->s+2))=='O' && toupper(*(s1->s+3))=='P') {		//		LOOP (286 ??
 		if(FNIsCond(s1->s+4)) {
 			char mybuf[8];
-			mybuf[0]='L'; mybuf[1]='O'; mybuf[2]='O'; mybuf[2]='P';  mybuf[3]=0;
+			mybuf[0]='L'; mybuf[1]='O'; mybuf[2]='O'; mybuf[3]='P';  mybuf[4]=0;
 		  return stricmp(mybuf,s2->s);
 			}
 		else
@@ -1525,6 +2011,22 @@ int subCmpMnem(struct CODE *s1, struct CODE *s2) {
 norm:
 	  return stricmp(s1->s,s2->s);
 #endif  
+  }
+int subCmpReg(struct REGS *s1, struct REGS *s2) {
+
+  return stricmp(s1->s,s2->s);
+  }
+int subCmpCond(struct COND *s1, struct COND *s2) {
+
+  return stricmp(s1->s,s2->s);
+  }
+int subCmpMyCode(struct MY_CODE *s1, struct MY_CODE *s2) {
+
+  return stricmp(s1->s,s2->s);
+  }
+int subCmpOper(struct OPERANDO *s1, struct OPERANDO *s2) {
+
+  return stricmp(s1->s,s2->s);
   }
 
 
@@ -1595,79 +2097,86 @@ uint64_t collectRegisters(void) {
 
 #if I8086
 uint8_t computeAddressing(int8_t V,int8_t T,int8_t Tt,uint32_t l,const char *TS) {
+	// si potrebbe restituire un valore speciale se l=0?? beh v. LDS ecc
 	uint8_t t=6;			// inizio con indirizz. solo offset...
 
 	if(V==VQ_REGISTER) {
-		if(Reg[T].m == 11) {		// BX
-			if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
-				t=0x87;
-			else if(l)
-				t=0x47;
-			else
-				t=7;
+		switch(Reg[T].m) {
+			case 11:		// BX
+				if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
+					t=0x87;
+				else if(l)
+					t=0x47;
+				else
+					t=7;
+				break;
+			case 13:		// BP
+				if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
+					t=0x86;
+				else
+					t=0x46;
+				break;
+			case 14:		// SI
+				if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
+					t=0x84;
+				else if(l)
+					t=0x44;
+				else
+					t=0x4;
+				break;
+			case 15:		// DI
+				if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
+					t=0x85;
+				else if(l)
+					t=0x45;
+				else
+					t=0x5;
+				break;
+			default:
+				PROCError(2062,TS);			// 
+				break;
 			}
-		else if(Reg[T].m == 13) {		// BP
-			if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
-				t=0x86;
-			else
-				t=0x46;
-			}
-		else if(Reg[T].m == 14) {		// SI
-			if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
-				t=0x84;
-			else if(l)
-				t=0x44;
-			else
-				t=0x4;
-			}
-		else if(Reg[T].m == 15) {		// DI
-			if(abs(l)>128)			// sarebbe +127/-128 ! sistemare?!
-				t=0x85;
-			else if(l)
-				t=0x45;
-			else
-				t=0x5;
-			}
-		else 
-		  PROCError(2062,TS);			// 
 		if(Tt) {
 			Tt--;
-			if(Reg[Tt].m == 11) {		// BX
-				if((t & 0xf)==4 || (t & 0xf)==5) {
-					t -= 4;				// SI o DI -> BX+SI o BX+DI
-					}
-				else 
+			switch(Reg[Tt].m) {
+				case 11:		// BX
+					if((t & 0xf)==4 || (t & 0xf)==5) {
+						t -= 4;				// SI o DI -> BX+SI o BX+DI
+						}
+					else 
+						PROCError(2062,TS);			// 
+					break;
+				case 13:		// BP
+					if((t & 0xf)==4 || (t & 0xf)==5) {
+						t -= 2;				// SI o DI -> BP+SI o BP+DI
+						}
+					else 
+						PROCError(2062,TS);			// 
+					break;
+				case 14:		// SI
+					if(t==0x46 || t==0x86) {		// BP -> BP+SI
+						t -= 4;
+						}
+					else if(t==7) {
+						t = 0;					// BX -> BX+SI
+						}
+					else 
+						PROCError(2062,TS);			// 
+					break;
+				case 15:		// DI
+					if(t==0x46 || t==0x86) {		// BP -> BP+DI
+						t -= 3;
+						}
+					else if(t==7) {
+						t = 1;					// BX -> BX+DI
+						}
+					else
+						PROCError(2062,TS);			// 
+					break;
+				default:
 					PROCError(2062,TS);			// 
+					break;
 				}
-			else if(Reg[Tt].m == 13) {		// BP
-				if((t & 0xf)==4 || (t & 0xf)==5) {
-					t -= 2;				// SI o DI -> BP+SI o BP+DI
-					}
-				else 
-					PROCError(2062,TS);			// 
-				}
-			else if(Reg[Tt].m == 14) {		// SI
-				if(t==0x46 || t==0x86) {		// BP -> BP+SI
-					t -= 4;
-					}
-				else if(t==7) {
-					t = 0;					// BX -> BX+SI
-					}
-				else 
-					PROCError(2062,TS);			// 
-				}
-			else if(Reg[Tt].m == 15) {		// DI
-				if(t==0x46 || t==0x86) {		// BP -> BP+DI
-					t -= 3;
-					}
-				else if(t==7) {
-					t = 1;					// BX -> BX+DI
-					}
-				else 
-					PROCError(2062,TS);			// 
-				}
-			else 
-				PROCError(2062,TS);			// 
 			}
 		}
 
@@ -1684,7 +2193,7 @@ void gotoEOL() {
 		;
 	}
 
-int FNIsStmt(const char *parm) {
+uint8_t FNIsStmt(const char *parm) {
   int T1,n;
 	int8_t oi;
   register int i,j,k;
@@ -1711,7 +2220,7 @@ int FNIsStmt(const char *parm) {
 #if I8086
   char T3S[256];        // 
   int8_t Is3;
-	uint8_t forcedSize;
+	uint8_t forcedSize,forcedSizeJmp;
 #endif
 
 nextStatement:
@@ -1730,10 +2239,13 @@ nextStatement:
 			FNLO(TS+1);       // salto il punto, (messo nelle direttive
 //#endif
 		}
-  if(!*TS) 
+  if(!*TS && !parm) { 
+	  if(OutList) 
+      PROCOut1("= ",theLine);		// butto fuori righe con solo commento! alcune le scrive 2 volte... specialmente sopo SEGMENT o ENDS...
     goto noStmt;
+		}
 
-  if(UNDEFD)
+  if(UNDEFD[IfDefs])
     goto soloIFS;
 
   mc.s=TS;
@@ -1752,7 +2264,7 @@ nextStatement:
 #elif GD24032
   mn=(struct CODE *)bsearch((void *)&mc,Mnem,105,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
 #elif I8086
-  mn=(struct CODE *)bsearch((void *)&mc,Mnem,435,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
+  mn=(struct CODE *)bsearch((void *)&mc,Mnem,437,sizeof(Mnem[0]),(int (*)(const void *, const void *))subCmpMnem);
 #endif  
 
   if(mn /*j*/) {
@@ -1778,18 +2290,12 @@ nextStatement:
 				PROCWarn(2067,"Extended!");
 #elif I8086
 			if(!CPass) {
-				if(Mnn==314 || Mnn==352) {
-					//finire
-//					PROCError(2067,"non valido per questa CPU");
-					if(CPULevel<1)
-						PROCError(2067,"non valido per questa CPU");
-					}
-				if(Mnn==81 || Mnn==202 || Mnn==316 || Mnn==353 || Mnn==355 || Mnn==363) {
+				if(Mnn==81 || Mnn==202 || Mnn==355 || Mnn==363) {
 					if(CPULevel<2)
 						PROCError(2067,"non valido per questa CPU");
 					}
-				if(Mnn==315 || Mnn==354) {
-					if(CPULevel<3)
+				if(Mnn==314 || Mnn==352) {
+					if(CPULevel<1)
 						PROCError(2067,"non valido per questa CPU");
 					}
 				if(Mnn==185) {
@@ -1801,7 +2307,7 @@ nextStatement:
 					PROCError(2067,"non valido per questa CPU");
 					}
 				}
-			if((Mnn>=364 && Mnn<=368) || Mnn==208) {		// REPnn, LOCK van di seguito
+			if((Mnn>=364 && Mnn<=368) || Mnn==207) {		// REPnn, LOCK van di seguito
 				k=subStmt(TS,ADDR_IMPL,&mn);  
 				PROCOut(mn->a[k].n);
 				// viene spezzata su due righe ma è complicato modificare...
@@ -1825,7 +2331,7 @@ nextStatement:
 		memset(&o4,0,sizeof(struct OPERAND));
 #endif
 #if I8086
-		forcedSize=0;
+		forcedSize=forcedSizeJmp=0;
 #endif
 #if GD24032
 		forcedSize=0;
@@ -1909,6 +2415,25 @@ isVar:
       case ARITM_VAR:
         if(o1.V>=VQ_OP_VAR) {
 					uint16_t oS=o1.S;		// 2025 x 8086 , verificare altri...
+					if(o1.T & VAR_STRING) {
+						char *str;
+						struct VARS *v;
+rifo_stringrepl:
+						str=*(char**)T1S;
+/* va fatto per ogni token!! poi mettere anche in op2
+						if(v=FNCercaVar(str,0,0,TRUE,CPass)) {
+							*(char**)T1S=(char*)v->value;
+							if(v->type & VAR_STRING)
+								goto rifo_stringrepl;
+							}
+						*/
+						i=strlen(str);
+						strmove(&theLine[p]+i+1,&theLine[theLinePtr]);
+						memcpy(&theLine[p+1],str,i);
+//								theLine[p+i]=' ';
+						theLinePtr=p;
+						goto rifoIsVar;
+						}
 					theLinePtr=p;
 					o1.l=FNEvalExpr(14,T1S);
 					if(!o1.l.valid)
@@ -1918,7 +2443,12 @@ isVar:
 						o1.S=0/*INT_SIZE*/;
 						}
 					else {
-						o1.S=oS /*FNGetSize(o1.l)*/;
+						if(o1.T & (VAR_RECORD | VAR_STRUCT | VAR_UNION))
+							o1.S=1;
+						else if(o2.T & VAR_ARRAY)
+							o1.S=1;
+						else
+							o1.S=oS /*FNGetSize(o1.l)*/;
 						}
 					}
         break;
@@ -1952,6 +2482,11 @@ isVar:
 							}
 						else {
 #endif
+#if I8086	
+						if(*T1S == '(') {		// su 8086/MASM accetto solo [] per indiretti...
+							}
+						else {
+#endif
 						o1.Ind=TRUE;
 						o1.Sptr=PTR_SIZE;
 						o1.S=0/*INT_SIZE*/;
@@ -1959,6 +2494,9 @@ isVar:
 	//					l=*TS;
 							goto rifoIsVar;
 	//					FNLA(myBuf);
+#if I8086
+							}
+#endif
 #if I8051 || GD24032
 			      }
 #endif
@@ -2001,7 +2539,15 @@ isVar:
 								else				// not
 								  goto isVar;
 								break;
+		          case 's':			// SHORT
+								if(tolower(T1S[1])=='h') { 		// short
+									forcedSizeJmp=1;
+									goto rifoIsVar;
+									}
+	              break;
 		          case 'f':			// FAR
+								if(forcedSizeJmp)
+									PROCError(2064);			//specificare :)
 								if(CPULevel>=3)
 		              forcedSize=6;
 								else
@@ -2085,11 +2631,13 @@ rifo_post1:
 				}
 
 			if(*T1S != bt) {
-				int8_t oldV=o1.V,oldT=o1.T,oldValid=o1.l.valid,newT=0;
+				int8_t oldV=o1.V,oldT=0,oldValid=o1.l.valid,newT=0;
 /*				if(*T1S != ',')
 					o1.l=FNEvalExpr(14,T1S);*/
 				if(*T1S == ',')
 					PROCCheck(',');
+				if(o1.V==VQ_REGISTER)
+					oldT=o1.T;
 
 //					o1.l=FNEvalExpr(14,T1S);
 get2reg:
@@ -2165,7 +2713,6 @@ get2reg:
 
 				}
       PROCCheck(bt);
-			bt=0;
 	    }		// Ind1
 	  FNLA(T1S);
 		if(*T1S && *T1S!=',')
@@ -2175,16 +2722,23 @@ get2reg:
 
 #elif I8086
 	  if(o1.Ind) {
-			char mysign=0;		// per offset negativi...
+			char mysign;		// per offset negativi...
 
+is_2_array:
+			mysign=0;
 			FNLA(T1S);
 
+			if(*T1S==',')			// qua no! (bx,200)
+				PROCError(2060,T1S);
+
 			if(*T1S != bt) {
-				int8_t oldV=o1.V,oldT=o1.T,oldValid=o1.l.valid,newT=0;
+				int8_t oldV=o1.V,oldT=0,oldValid=o1.l.valid,newT=0;
 /*				if(*T1S != ',')
 					o1.l=FNEvalExpr(14,T1S);*/
-				if(*T1S == ',')
-					PROCCheck(',');
+//				if(*T1S == ',')
+//					PROCCheck(',');
+				if(o1.V==VQ_REGISTER)
+					oldT=o1.T;
 
 //					o1.l=FNEvalExpr(14,T1S);
 get2reg:
@@ -2268,7 +2822,6 @@ get2reg:
 
 				}
       PROCCheck(bt);
-			bt=0;
 	    }		// Ind1
 
 	  FNLA(TS);
@@ -2297,6 +2850,22 @@ get2reg:
 						PROCError(2061,T1S);
 					}
 				}
+			else if(*TS=='[')	{		// in teoria anche tonda ma amen
+				FNLO(T1S);
+				goto is_2_array;
+				}
+			else if(*TS=='.')	{	// questo accade quando c'è struct oper dopo array ecc (froci
+				struct TAGS *myT;
+				FNLO(TS);
+				FNLO(TS);
+				if(!*TS)
+					PROCError(2060,TS);
+				if(myT=FNCercaAggr(TS,2,NULL)) {
+					o1.l.v+=myT->pos;
+					}
+
+//						goto rifoIsVar;
+				}
 			else if(*TS!=',')
 				PROCError(2060,TS);
 			}
@@ -2323,11 +2892,9 @@ get2reg:
 				// QUA COME FACEVA AD ANDARE?? in effetti funziona lo stesso, è gestito sotto... mah vabbe'
 //					credo idem usare     i=FNGetAritElem(T1S,&o1,0);
 
-				bt=0;
 				}
 #else
       PROCCheck(bt);
-			bt=0;
 #endif
 
 	    }
@@ -2335,6 +2902,7 @@ get2reg:
 #endif
 
     
+		bt=0;
     if(Impl) {
 #if GD24032
 			uint32_t n;
@@ -2405,6 +2973,9 @@ rifoIsVar2:
 				o2.V=0;
 				o2.op=0;
 #endif
+		if(__line__==7354) {
+//				printf("BREAK ARRAY a %u\n",__line__);
+				}
 		    i=FNGetAritElem(T2S,&o2,0);
 #if _6502
 				if(bt)
@@ -2441,6 +3012,24 @@ isVar2:
 		      case ARITM_VAR:
 						if(o2.V>=VQ_OP_VAR) {
 							uint16_t oS=o2.S;		// 2025 x 8086 , verificare altri...
+							if(o2.T & VAR_STRING) {
+								char *str;
+rifo_stringrep2:
+								str=*(char**)T2S;
+/* va fatto per ogni token!! v.sopra
+						if(v=FNCercaVar(str,0,0,TRUE,CPass)) {
+							*(char**)T2S=(char*)v->value;
+							if(v->type & VAR_STRING)
+								goto rifo_stringrep2;
+							}
+						*/
+								i=strlen(str);
+								strmove(&theLine[p]+i,&theLine[theLinePtr]);
+								memcpy(&theLine[p],str,i);
+//								theLine[p+i]=' ';
+								theLinePtr=p;
+								goto rifoIsVar2;
+								}
 							theLinePtr=p;
 							o2.l=FNEvalExpr(14,T2S);
 							if(!o2.l.valid)
@@ -2450,7 +3039,12 @@ isVar2:
 						o2.S=0/*INT_SIZE*/;
 								}
 							else {
-								o2.S=oS;
+								if(o2.T & (VAR_RECORD | VAR_STRUCT | VAR_UNION))
+									o2.S=1;
+								else if(o2.T & VAR_ARRAY)			// non arriva perché è DENTRO la evalexpr... sistemare...
+									o2.S=1;
+								else
+									o2.S=oS;
 								}
 		          }
 		        break;
@@ -2481,11 +3075,21 @@ isVar2:
 									}
 								else {
 #endif
+#if I8086	
+								if(*T2S == '(') {		// su 8086/MASM accetto solo [] per indiretti...
+									theLinePtr--;
+									goto isVar2;
+									}
+								else {
+#endif
 									o2.Ind=TRUE;
 									o2.Sptr=PTR_SIZE;
 						o2.S=0/*INT_SIZE*/;
      							bt=*T2S == '(' ? ')' : ']';
 									goto rifoIsVar2;
+#if I8086	
+								}
+#endif
 #if GD24032
 						      }
 #endif
@@ -2535,6 +3139,7 @@ isVar2:
 											forcedSize=4;
 										goto rifoIsVar2;
 										break;
+									case 's':		// qua short non dovrebbe esistere!
 									default:
 							      goto isVar2;
 										break;
@@ -2591,13 +3196,15 @@ rifo_post2:
 						}
 
 					if(*T2S != bt) {
-						int8_t oldV=o2.V,oldT=o2.T,oldValid=o2.l.valid,newT=0;
+						int8_t oldV=o2.V,oldT=0,oldValid=o2.l.valid,newT=0;
 						if(*T2S == ',')
 							PROCCheck(',');
 /*		      if(*T2S != bt)
 		        o2.l=FNEvalExpr(14,T2S);
 	        PROCCheck(bt);*/
 //    fprintf(stderr,"\tEVx2 %lx\n",l2);
+						if(o2.V==VQ_REGISTER)
+							oldT=o2.T;
 
 get2reg2:
 						p=theLinePtr;
@@ -2676,18 +3283,24 @@ get2reg2:
 
 #elif I8086
 	  	  if(o2.Ind) {
-					char mysign=0;		// per offset negativi...
+					char mysign;		// per offset negativi...
 
 		      FNLA(T2S);
+					if(*T2S==',')					// qua no! (bx,200)
+						PROCError(2060,T2S);
 
+is_2_array2:
+					mysign=0;
 					if(*T2S != bt) {
-						int8_t oldV=o2.V,oldT=o2.T,oldValid=o2.l.valid,newT=0;
-						if(*T2S == ',')
-							PROCCheck(',');
+						int8_t oldV=o2.V,oldT=0,oldValid=o2.l.valid,newT=0;
+//						if(*T2S == ',')
+//							PROCCheck(',');
 /*		      if(*T2S != bt)
 		        o2.l=FNEvalExpr(14,T2S);
 	        PROCCheck(bt);*/
 //    fprintf(stderr,"\tEVx2 %lx\n",l2);
+						if(o2.V==VQ_REGISTER)
+							oldT=o2.T;
 
 get2reg2:
 						p=theLinePtr;
@@ -2716,7 +3329,7 @@ get2reg2:
 									if(newT || oldT)		// se c'è già un registro..
 										o2.reg2reg=o2.T+1;
 									else
-										newT=o1.T;
+										newT=o2.T;
 									}
 								else {
 									theLinePtr=p;
@@ -2794,7 +3407,23 @@ get2reg2:
 								PROCError(2061,T2S);
 							}
 						}
-					else if(*TS!=',')
+					else if(*TS=='[')	{		// in teoria anche tonda ma amen
+						FNLO(T2S);
+						goto is_2_array2;
+						}
+					else if(*TS=='.')	{	// questo accade quando c'è struct oper dopo array ecc (froci
+						struct TAGS *myT;
+						FNLO(TS);
+						FNLO(TS);
+						if(!*TS)
+							PROCError(2060,TS);
+						if(myT=FNCercaAggr(TS,2,NULL)) {
+							o2.l.v+=myT->pos;
+							}
+
+//						goto rifoIsVar2;
+						}
+					else if(*TS != ',')
 						PROCError(2060,TS);
 					}
 
@@ -3546,24 +4175,24 @@ y16bit:
     
 #elif I8051
 	    if(Is2) {
-	      if(Ind1 && Ind2) {
+	      if(o1.Ind && o2.Ind) {
           PROCError(2062,T2S);
           }
-		    else if(Ind1) {
-	  	    if(V1>=0) {                                 // ld (NN),
-	  	      if(V2==VQ_REGISTER) {
+		    else if(o1.Ind) {
+	  	    if(o1.V>=0) {                                 // ld (NN),
+	  	      if(o2.V==VQ_REGISTER) {
 		  	      if(o2.S==1) {
-			  	      if(T2==0) {                          // ld (0300h),a
-			            k=subStmt(TS,17,&mn);
+			  	      if(o2.T==0) {                          // ld (0300h),a
+			            k=subStmt(TS,ADDR_17,&mn);
 			  	        if(Mnn==39) {                            // gestisco OUT
 			  	          if(o1.Sptr==1) {
-					            PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)),-1,0);
+					            PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),-1,0);
 					            }
 					          else 
 					            PROCError(2064,T1S);
 			  	          }
 			  	        else {
-				            PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),HIBYTE(HIWORD(l)));    // con segm.
+				            PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)),o1.l.seg);    // con segm.
 					          }
 					        }
 					      else 
@@ -3572,13 +4201,13 @@ y16bit:
 				      else {
 				        k=subStmt(TS,ADDR_18,&mn);                               // ld (0300h),bc
 				        if(k>=0) {
-				          switch(Reg[T2].m) {
+				          switch(Reg[o2.T].m) {
 				            case 0:
 				            case 1:
-				              PROCOut(0xed43 | (Reg[T2].m << 4),LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),HIBYTE(HIWORD(l)));    // con segm.
+				              PROCOut(0xed43 | (Reg[o2.T].m << 4),LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)),o1.l.seg);    // con segm.
 				              break;
 				            case 2:
-				              PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),HIBYTE(HIWORD(l)));    // con segm.
+				              PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)),o1.l.seg);    // con segm.
 				              break;
 				            default:
 				              PROCError(2062,T2S);
@@ -3589,43 +4218,43 @@ y16bit:
             else 
 	  	        PROCError(2062,T2S);
 			      }
-				  else if(V1==VQ_REGISTER) {                      // ld (r16),
-	  	      if(V2>=VQ_OP_VAR) {                       // ld (bc),20
+				  else if(o1.V==VQ_REGISTER) {                      // ld (r16),
+	  	      if(o2.V>=VQ_OP_VAR) {                       // ld (bc),20
 	    	      if(o1.S==1) 
   	  	        PROCError(2064,T1S);
 	  	        if(o2.S>1/* && Reg[T].m!=0x13*/)      // solo SP?...
 	  	          PROCError(2064,T1S);
-		          switch(Reg[T].m) {
+		          switch(Reg[o1.T].m) {
 		            case 2:
   			          k=subStmt(TS,ADDR_19,&mn);  
-  			          PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),-1,0);
+  			          PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),-1,0);
 		              break;
 		            default:
 		              PROCError(2062,T1S);
 		              break;
 				        } 
 				      }
-				    else if(V2==VQ_REGISTER) {                         // ld (bc),a
+				    else if(o2.V==VQ_REGISTER) {                         // ld (bc),a
 				      if(o1.S==1) {
 			  	      if(o2.S>1)                    // solo out(c),a..
 		  	          PROCError(2064,T2S);  
 		  	        k=subStmt(TS,ADDR_28,&mn);                     
-								PROCOut(mn->a[k].n | (Reg[T2].m << 3));  
+								PROCOut(mn->a[k].n | (Reg[o2.T].m << 3));  
 				        }
 				      else {
-			  	      if(o2.S>1 && Reg[T].m!=0x13)                    // solo per EX (SP),..
+			  	      if(o2.S>1 && Reg[o1.T].m!=0x13)                    // solo per EX (SP),..
 		  	          PROCError(2064,T1S);
-			          switch(Reg[T].m) {
+			          switch(Reg[o1.T].m) {
 			            case 0:
 			            case 1:
-			              if(Reg[T2].m==7)                          // solo ld (r16),a
-			                PROCOut(0x02 | (Reg[T].m << 4));
+			              if(Reg[o2.T].m==7)                          // solo ld (r16),a
+			                PROCOut(0x02 | (Reg[o1.T].m << 4));
 			              else
 			                PROCError(2062,T1S);
 			              break;
 			            case 2:
     			          k=subStmt(TS,ADDR_20,&mn);  
-    			          PROCOut(mn->a[k].n | Reg[T2].m);
+    			          PROCOut(mn->a[k].n | Reg[o2.T].m);
 			              break;
 			            default:
 			              PROCError(2062,T1S);
@@ -3635,49 +4264,49 @@ y16bit:
 				      }
 				    }
 			    }		// Ind1
-		    else if(Ind2) {
-				  if(V1==VQ_REGISTER) {   
+		    else if(o1.Ind) {
+				  if(o1.V==VQ_REGISTER) {   
 	  	      if(o1.S==1) {                          // ld a,()
-	  	        if(V2>=VQ_OP_VAR) { 
- 			          if(T==0) {
+	  	        if(o2.V>=VQ_OP_VAR) { 
+ 			          if(o1.T==0) {
                   k=subStmt(TS,ADDR_21,&mn);  
 			  	        if(Mnn==21) {                            // gestisco IN
 			  	          if(o2.Sptr==1)
-		                  PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),-1,0);
+		                  PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),-1,0);
 		                else 
 		                  PROCError(2064,T2S);
 		                }
 		              else {
-		                PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));    // con segm.
+		                PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
 		                }
 		              }
  	              else
 	                PROCError(2062,T1S);
 				        }                    
-					    else if(V2==VQ_REGISTER) {                         // ld a,(bc)
+					    else if(o2.V==VQ_REGISTER) {                         // ld a,(bc)
 			  	      if(o2.S==1) {
-			  	        if(Reg[T2].m==1 && Mnn==21)             // per IN
-	                  PROCOut(0xed,0x40 | Reg[T].m << 3,-1,0);
+			  	        if(Reg[o2.T].m==1 && Mnn==21)             // per IN
+	                  PROCOut(0xed,0x40 | Reg[o1.T].m << 3,-1,0);
 	                else 
 	                  PROCError(2062,T2S);
 	                }               
 	              else {
-				          switch(Reg[T2].m) {
+				          switch(Reg[o2.T].m) {
 				            case 0:
 				            case 1:
-				              if(Reg[T].m==7)
-				                PROCOut(0x0a | (Reg[T2].m << 4));
+				              if(Reg[o1.T].m==7)
+				                PROCOut(0x0a | (Reg[o2.T].m << 4));
 				              else
 				                PROCError(2062,T1S);
 				              break;
 				            case 2:
-				              if(Reg[T].m==7) {
+				              if(Reg[o1.T].m==7) {
   	    			          k=subStmt(TS,ADDR_9,&mn);  
   	    			          PROCOut(mn->a[k].n);
   	    			          }
 				              else {
   	    			          k=subStmt(TS,ADDR_32,&mn);
-  	    			          PROCOut(mn->a[k].n | (Reg[T].m << 3));
+  	    			          PROCOut(mn->a[k].n | (Reg[o1.T].m << 3));
   	    			          }
 	    			          break;
 				            default:
@@ -3688,14 +4317,14 @@ y16bit:
 				        }
 				      }                                        // ld r16,(nn)
 			      else { 
-		          switch(Reg[T].m) {
+		          switch(Reg[o1.T].m) {
 		            case 0:
 		            case 1:
-	                PROCOut(0xed4b | (Reg[T].m << 4),LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));    // con segm.
+	                PROCOut(0xed4b | (Reg[o1.T].m << 4),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
 		              break;
 		            case 2:
   			          k=subStmt(TS,ADDR_22,&mn);  
-  			          PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));    // con segm.
+  			          PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
 		              break;
 		            default:
 		              PROCError(2062,T1S);
@@ -3703,12 +4332,12 @@ y16bit:
 		            }
 				      }
 				    }
-				  else if(V1>=VQ_OP_VAR) {                    // bit,set,res
-				    if(V2==VQ_REGISTER && o2.S==2 && l>=0 && l<=7) {
-			        switch(Reg[T2].m) {
+				  else if(o1.V>=VQ_OP_VAR) {                    // bit,set,res
+				    if(o2.V==VQ_REGISTER && o2.S==2 && o1.l.v>=0 && o1.l.v<=7) {
+			        switch(Reg[o2.T].m) {
 		            case 2:
   			          k=subStmt(TS,ADDR_BIT2,&mn);  
-  			          PROCOut(mn->a[k].n | l << 3);
+  			          PROCOut(mn->a[k].n | o1.l.v << 3);
 		              break;
 		            default:
 		              PROCError(2062,T2S);
@@ -3722,39 +4351,39 @@ y16bit:
           }
  		    else {                                       // ld r,r
 //   printf("eccooo %d %d %d %d\n",V1,o1.S,V2,o2.S);
-				  if(V1==VQ_REGISTER) {
+				  if(o1.V==VQ_REGISTER) {
 	  	      if(o1.S==1) {                          // mov r0,20
-	  	        if(V2>=VQ_OP_VAR) { 
+	  	        if(o2.V>=VQ_OP_VAR) { 
 	  	          if(o2.S>1) 
 	  	            PROCError(2064,T2S);
-	  	          if(Reg[T].m==0) {
+	  	          if(Reg[o1.T].m==0) {
 	 			          k=subStmt(TS,ADDR_IMM8,&mn);            // FILTRO QUELLE CHE accettano solo A
-	    			      PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),-1,0);
+	    			      PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),-1,0);
     			        }
     			      else {
-    			        k=subStmt(TS,11,&mn);   
-	    			      PROCOut(mn->a[k].n | (Reg[T].m & 0xf),LOBYTE(LOWORD(l2)),-1,0);
+    			        k=subStmt(TS,ADDR_11,&mn);   
+	    			      PROCOut(mn->a[k].n | (Reg[o1.T].m & 0xf),LOBYTE(LOWORD(o2.l.v)),-1,0);
     			        }
 				        }                    
-					    else if(V2==VQ_REGISTER) {                         // ld a,b
+					    else if(o2.V==VQ_REGISTER) {                         // ld a,b
 			  	      if(o1.S==1) {
-			  	        if(T==0) {                                // solo a
-			  	          if(Reg[T2].m & 0x10) {
-	   			            k=subStmt(TS,Reg[T2].m & 1 ? ADDR_61 : ADDR_60,&mn);  
+			  	        if(o1.T==0) {                                // solo a
+			  	          if(Reg[o2.T].m & 0x10) {
+	   			            k=subStmt(TS,Reg[o2.T].m & 1 ? ADDR_61 : ADDR_60,&mn);  
 	        			      PROCOut(mn->a[k].n);
 			  	            }
 			  	          else {
 	   			            k=subStmt(TS,ADDR_REG8,&mn);  
-	        			      PROCOut(mn->a[k].n | Reg[T2].m);
+	        			      PROCOut(mn->a[k].n | Reg[o2.T].m);
 	        			      }
         			      }
-        			    else if(Reg[T].m & 0x10) {
-        			      k=subStmt(TS,Reg[T].m & 1 ? ADDR_63 : ADDR_62,&mn);  
+        			    else if(Reg[o1.T].m & 0x10) {
+        			      k=subStmt(TS,Reg[o1.T].m & 1 ? ADDR_63 : ADDR_62,&mn);  
 	        			    PROCOut(mn->a[k].n);
         			      }
    			          else {
    			            k=subStmt(TS,ADDR_10,&mn);  
-      			        PROCOut(mn->a[k].n | (Reg[T].m << 3) | Reg[T2].m);
+      			        PROCOut(mn->a[k].n | (Reg[o1.T].m << 3) | Reg[o2.T].m);
       			        }
 			            }
 				        }
@@ -3762,39 +4391,39 @@ y16bit:
 				        PROCError(2062,T2S);
 				      }
 			      else { 
-		  	      if(V2>=VQ_OP_VAR) {                       // ld bc,20
-		  	        switch(Reg[T].m) {
+		  	      if(o2.V>=VQ_OP_VAR) {                       // ld bc,20
+		  	        switch(Reg[o1.T].m) {
 		  	          case 0:
 		  	          case 1:
 		  	          case 2:
 		  	          case 0x13:
  			              k=subStmt(TS,ADDR_23,&mn);  
- 			              PROCOut(mn->a[k].n | ((Reg[T].m & 0xf) << 4),LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));    // con segm.
+ 			              PROCOut(mn->a[k].n | ((Reg[o1.T].m & 0xf) << 4),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
  			              break;
  			            case 16:
  			            case 17:
- 			              PROCOut(0xdd21 | ((Reg[T].m & 0xf) << 13),LOBYTE(LOWORD(l2)),HIBYTE(LOWORD(l2)),HIWORD(l2));    // con segm.
+ 			              PROCOut(0xdd21 | ((Reg[o1.T].m & 0xf) << 13),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
  			              break;
  			            default:
  			              PROCError(2062,T2S);
  			              break;
  			            }  
 		  	        }
-		          else if(V2==VQ_REGISTER) {                // sbc hl,de
-				        switch(Reg[T].m) {
+		          else if(o2.V==VQ_REGISTER) {                // sbc hl,de
+				        switch(Reg[o1.T].m) {
 			            case 3:                      // ex af
-			              if(Reg[T2].m != 0x23)
+			              if(Reg[o2.T].m != 0x23)
 			                PROCError(2062,T2S);
 	  			          PROCOut(0x8);
 			              break;
 			            case 1:                      // ex de
-	  			          if(Reg[T2].m != 2)
+	  			          if(Reg[o2.T].m != 2)
 			                PROCError(2062,T2S);
 	  			          PROCOut(0xeb);
 			              break;
 			            case 2:
 	  			          k=subStmt(TS,ADDR_IMM16,&mn);  
-	  			          PROCOut(mn->a[k].n | (Reg[T2].m & 0xf) << 4);
+	  			          PROCOut(mn->a[k].n | (Reg[o2.T].m & 0xf) << 4);
 			              break;
 			            default:
 			              PROCError(2062,T2S);
@@ -3802,10 +4431,10 @@ y16bit:
 		            }
 				      }
 				    }
-				  else if(V1>=0) {                    // bit,set,res
-				    if(V2==VQ_REGISTER && o2.S==1 && l>=0 && l<=7) {
+				  else if(o1.V>=0) {                    // bit,set,res
+				    if(o2.V==VQ_REGISTER && o2.S==1 && o1.l.v>=0 && o1.l.v<=7) {
 		          k=subStmt(TS,ADDR_BIT,&mn);  
-		          PROCOut(mn->a[k].n | l << 3 | Reg[T2].m);
+		          PROCOut(mn->a[k].n | o1.l.v << 3 | Reg[o2.T].m);
 				      }
             else { 
               PROCError(2062,T1S);
@@ -3814,8 +4443,8 @@ y16bit:
           }
 			  }		// Is2
 			else {                                     // 1 solo parm
-		    if(V1>=VQ_OP_VAR) {
-		      if(Ind1) {
+		    if(o1.V>=VQ_OP_VAR) {
+		      if(o1.Ind) {
             PROCError(2062,T1S);
 			      }
 			    else {
@@ -3824,56 +4453,56 @@ y16bit:
   			      if(k>=0) {
 //   fprintf(stderr,"\tCurAddr: %x, l=%lx\n",CurAddr,l);
   			        if(Mnn==28 || Mnn==15) {                 // gestisco JR e DJNZ
-                  subBranch(TS,T2S,mn,T,k,l,FALSE);
+                  subBranch(TS,T2S,mn,o1.T,k,o1.l,FALSE);
   			          }
   			        else if(Mnn==58) {                              // gestisco RST
 //    fprintf(stderr,"\tEVx %ld\n",l);
-  			          if((l & 7) || l>0x38 || l<0)
+  			          if((o1.l.v & 7) || o1.l.v>0x38 || o1.l.v<0)
   			            PROCError(2062,T1S);
- 	  		          PROCOut(mn->a[k].n | (LOBYTE(LOWORD(l))));
+ 	  		          PROCOut(mn->a[k].n | (LOBYTE(LOWORD(o1.l.v))));
 	  		          }
   			        else if(Mnn==20) {                              // gestisco IM
-  			          if(l<0 || l>2)
+  			          if(o1.l.v<0 || o1.l.v>2)
   			            PROCError(2062,T1S);
- 	  		          PROCOut(mn->a[k].n | (l ? (l<<3)+8 : 0));
+ 	  		          PROCOut(mn->a[k].n | (o1.l.v ? (o1.l.v<<3)+8 : 0));
 	  		          }
   			        else if(Mnn==4 || Mnn==27) {                           // gestisco CALL e JP 
- 	  		          PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),HIBYTE(HIWORD(l)));    // con segm.
+ 	  		          PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)),o1.l.seg);    // con segm.
 	  		          }
 	  		        else                                   
-	  		          PROCOut(mn->a[k].n,LOBYTE(LOWORD(l)),-1,0);
+	  		          PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),-1,0);
 	  		        }
   			      }
   			    else {
   			      k=subStmt(TS,ADDR_14,&mn);         // jp ea31
   			      if(k>=0) {
 //   fprintf(stderr,"\tCurAddr: %lx, l=%lx T1S %s\n",CurAddr,l,T1S);
-                subBranch(TS,T2S,mn,T,k,l,FALSE);           // si autogestisce CALL, JP  e JR
+                subBranch(TS,T2S,mn,o1.T,k,o1.l,FALSE);           // si autogestisce CALL, JP  e JR
 	  		        }
   			      }
 				    }
 			    }
-			  else if(V1==VQ_REGISTER) {
-			    if(Ind1) {
+			  else if(o1.V==VQ_REGISTER) {
+			    if(o1.Ind) {
 		        if(o1.S==2) {
-		          if(Reg[T].m==2) {                // jp (hl)
+		          if(Reg[o1.T].m==2) {                // jp (hl)
    			        k=subStmt(TS,ADDR_9,&mn);
   			        if(k>=0) 
 			            PROCOut(mn->a[k].n);
 			          }
-			        else if(Reg[T].m==16 || Reg[T].m==17) {
+			        else if(Reg[o1.T].m==16 || Reg[o1.T].m==17) {
 			          if(Mnn==27) {                  // gestisco jp (ix)
 			            k=subStmt(TS,ADDR_12,&mn);
-  	              PROCOut(mn->a[k].n | ((Reg[T].m & 0xf) << 13));
+  	              PROCOut(mn->a[k].n | ((Reg[o1.T].m & 0xf) << 13));
 			            }
 			          else {
 			            k=subStmt(TS,ADDR_IX_IY,&mn);
-			            l3=mn->a[k].n;
-			            if(l3 & 0xff0000) {
-		                PROCOut(l3 >> 8 | ((Reg[T].m & 0xf) << 13),LOBYTE(LOWORD(l)),LOBYTE(LOWORD(l3)),0);
+			            o3.l.v=mn->a[k].n;
+			            if(o3.l.v & 0xff0000) {
+		                PROCOut(o3.l.v >> 8 | ((Reg[o1.T].m & 0xf) << 13),LOBYTE(LOWORD(o1.l.v)),LOBYTE(LOWORD(o3.l.v)),0);
 		                }
 		              else                                     
-		                PROCOut(l3 | ((Reg[T].m & 0xf) << 13),LOBYTE(LOWORD(l)),-1,0);
+		                PROCOut(o3.l.v | ((Reg[o1.T].m & 0xf) << 13),LOBYTE(LOWORD(o1.l.v)),-1,0);
 			            }
 			          }
 			        else 
@@ -3885,13 +4514,13 @@ y16bit:
 			      }
           else {
 				    if(o1.S==1) {
-					    if(Reg[T].m<8) {
+					    if(Reg[o1.T].m<8) {
 	  			      k=subStmt(TS,ADDR_10,&mn);         // or B
 	  			      if(k>=0) {
 	  			        if(Mnn==13 || Mnn==21 || Mnn==22 || Mnn==39)           // gestisco INC,DEC,IN,OUT
-		  		          PROCOut(mn->a[k].n | (Reg[T].m << 3));
+		  		          PROCOut(mn->a[k].n | (Reg[o1.T].m << 3));
 		  		        else                                         
-		  		          PROCOut(mn->a[k].n | Reg[T].m);
+		  		          PROCOut(mn->a[k].n | Reg[o1.T].m);
 		  		        }
 					      }
 					    else {
@@ -3899,10 +4528,10 @@ y16bit:
 					      }
 					    }
 				    else {
-		          if(Reg[T].m<4) {                       // inc hl
+		          if(Reg[o1.T].m<4) {                       // inc hl
    			        k=subStmt(TS,ADDR_IMM16,&mn);
   			        if(k>=0) 
-	 		            PROCOut(mn->a[k].n | (Reg[T].m << 4));
+	 		            PROCOut(mn->a[k].n | (Reg[o1.T].m << 4));
 			          }
 			        else 
 			          PROCError(2062,T1S);
@@ -3912,22 +4541,22 @@ y16bit:
 			  }
 #elif ST62
 	    if(Is2) {
-	      if(Ind1 && Ind2) {
+	      if(o1.Ind && o2.Ind) {
           PROCError(2062,T2S);
           }
-		    else if(Ind1) {
-	  	    if(V1>=VQ_OP_VAR) {                                 // ld (NN),
+		    else if(o1.Ind) {
+	  	    if(o1.V>=VQ_OP_VAR) {                                 // ld (NN),
   	        PROCError(2062,T2S);
 			      }
-				  else if(V1==VQ_REGISTER) {                      // ld (r8),
-	  	      if(V2>=VQ_OP_VAR) {                       // ld (r8),20
+				  else if(o1.V==VQ_REGISTER) {                      // ld (r8),
+	  	      if(o2.V>=VQ_OP_VAR) {                       // ld (r8),20
   	          PROCError(2064,T2S);  
 				      }
-				    else if(V2==VQ_REGISTER) {                         // ld (bc),a
+				    else if(o2.V==VQ_REGISTER) {                         // ld (bc),a
 				      if(o1.S==1) {
-			  	      if(o2.S>1 || Reg[T2].m)  // solo ,A
+			  	      if(o2.S>1 || Reg[o2.T].m)  // solo ,A
 		  	          PROCError(2064,T2S);  
-			          switch(Reg[T].m) {
+			          switch(Reg[o1.T].m) {
 			            case 1:
 	  			          k=subStmt(TS,ADDR_24,&mn);
 	  			          PROCOut(mn->a[k].n);
@@ -3947,15 +4576,15 @@ y16bit:
 				      }
 				    }
 			    }		// Ind1
-		    else if(Ind2) {
-				  if(V1==VQ_REGISTER) {   
+		    else if(o2.Ind) {
+				  if(o1.V==VQ_REGISTER) {   
 	  	      if(o1.S==1) {                          // ld a,()
-	  	        if(V2>=VQ_OP_VAR) {
+	  	        if(o2.V>=VQ_OP_VAR) {
                 PROCError(2062,T1S);
 				        }                    
-					    else if(V2==VQ_REGISTER) {                         // ld a,(bc)
+					    else if(o2.V==VQ_REGISTER) {                         // ld a,(bc)
 			  	      if(o2.S==1) {
-				          switch(Reg[T2].m) {
+				          switch(Reg[o2.T].m) {
 				            case 1:
 		  			          k=subStmt(TS,ADDR_IX_IY,&mn);
 		  			          PROCOut(mn->a[k].n);
@@ -3978,48 +4607,48 @@ y16bit:
               PROCError(2062,T2S);
 				      }
 				    }
-				  else if(V1>=0) {                    // ld a,(nn)
+				  else if(o1.V>=0) {                    // ld a,(nn)
             PROCError(2062,T1S);
 				    }
           }
  		    else {                                       // ld r,r
 //   printf("eccooo R,R %d %d %d %d (Mnn=%d)\n",V,S,V2,S2,Mnn);
-				  if(V1==VQ_REGISTER) {
+				  if(o1.V==VQ_REGISTER) {
 	  	      if(o1.S==1) {                          // ld v,20
-	  	        if(V2>=VQ_OP_VAR) { 
+	  	        if(o2.V>=VQ_OP_VAR) { 
 	  	          if(o2.S>1) 
 	  	            PROCError(2064,T2S);
 	  	            
-	  	          if(Reg[T].m==0) {
+	  	          if(Reg[o1.T].m==0) {
 	 			          k=subStmt(TS,ADDR_IMM8,&mn);
-	    			      PROCOut(mn->a[k].n,LOBYTE(LOWORD(l2)),-1,0);
+	    			      PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),-1,0);
     			        }
     			      else {
 	 			          k=subStmt(TS,ADDR_IMM16,&mn);
-	    			      PROCOut(mn->a[k].n,0x80 | (Reg[T].m -1),LOBYTE(LOWORD(l2)),0);
+	    			      PROCOut(mn->a[k].n,0x80 | (Reg[o1.T].m -1),LOBYTE(LOWORD(o2.l.v)),0);
     			        }
 				        }                    
-					    else if(V2==VQ_REGISTER) {                         // ld a,b
+					    else if(o2.V==VQ_REGISTER) {                         // ld a,b
 			  	      if(o1.S==1) {
 			  	        if(Mnn == 18) {    // LD
-				  	        if(T==0) {                                // solo a
-	  		  	          if(T2==0)
+				  	        if(o1.T==0) {                                // solo a
+	  		  	          if(o2.T==0)
 	  		  	            PROCError(2062,T2S);
 	   			            k=subStmt(TS,ADDR_REG8,&mn);  
-	        			      PROCOut(mn->a[k].n | ((Reg[T2].m - 1) << 6));
+	        			      PROCOut(mn->a[k].n | ((Reg[o2.T].m - 1) << 6));
 	        			      }
 	        			    else {
 	   			            k=subStmt(TS,ADDR_10,&mn);  
-	        			      PROCOut(mn->a[k].n | ((Reg[T].m - 1) << 6));
+	        			      PROCOut(mn->a[k].n | ((Reg[o1.T].m - 1) << 6));
 	        			      }
 	        			    }
 	        			  else {
-				  	        if(T==0) {                                // solo a
+				  	        if(o1.T==0) {                                // solo a
 	   			            k=subStmt(TS,ADDR_REG8,&mn);  
-				  	          if(T2==0)
+				  	          if(o2.T==0)
 	        			        PROCOut(mn->a[k].n,0xff,-1,0);
 				  	          else
-  	        			      PROCOut(mn->a[k].n,0x80 | (Reg[T2].m - 1),-1,0);
+  	        			      PROCOut(mn->a[k].n,0x80 | (Reg[o2.T].m - 1),-1,0);
 	        			      }
 	        			    else {
 	   			            PROCError(2062,T1S);
@@ -4034,22 +4663,22 @@ y16bit:
               PROCError(2062,T2S);
 				      }
 				    }
-				  else if(V1>=VQ_OP_VAR) {                    // ld r,n  opp. (rr),n
+				  else if(o1.V>=VQ_OP_VAR) {                    // ld r,n  opp. (rr),n
 				    if(o1.S==1 && o2.S==1) {
 				      if(*FNLA(T3S)) {        // jrs,jrr
 				        PROCCheck(',');
 				        *T3S=0;
-								S3=0;
-								T3=0;
-								V3=0;
+								o3.S=0;
+								o3.T=0;
+								o3.V=0;
 								o3.op=0;
 						    p=theLinePtr;
-						    i=FNGetAritElem(T3S,&V3,&v3,&T3,&S3,&o3.op,0);
-						    if(i>ARITM_EOL && i<ARITM_OPER && V3>=0) {
-					        V3=0;
+						    i=FNGetAritElem(T3S,&o3,0);
+						    if(i>ARITM_EOL && i<ARITM_OPER && o3.V>=0) {
+					        o3.V=0;
 //2024 verificare					        fseek(FIn,p,SEEK_SET);
-					        l3=FNEvalExpr(14,T3S);
-									if(!l3.valid)
+					        o3.l=FNEvalExpr(14,T3S);
+									if(!o3.l.valid)
 										PROCError(2062);
 									if(o3.Ind) {
 										o3.Sptr=FNGetSize(o3.l);
@@ -4063,58 +4692,58 @@ y16bit:
 					        }
 					      else
                   PROCError(2062,T3S);
-						    if(l < 0 || l > 7)
+						    if(o3.l.v < 0 || o3.l.v > 7)
 						      PROCError(2063,T1S);
 			          k=subStmt(TS,ADDR_CONDIZ_IMM,&mn);
-    						l3=*((int16_t *)&l3)-Seg[CurSeg-1].CurAddr-3;
+    						o3.l.v=LOWORD(o3.l.v)-Seg[CurSeg-1].CurAddr-3;
 //						    if(l2 > 127 || l2 < -128)
 //						      PROCError(2063,T2S);
-			          if(l & 4)
-			            l|=0x20;
-			          if(l & 2)
-			            l|=0x40;
-			          if(l & 1)
-			            l|=0x80;
-			          l &= 0xe0;     // i bit sono invertiti...
-						    if(V2==VQ_REGISTER) {
-						      if(T2 == 0)
-			              PROCOut(mn->a[k].n | l,0xff,l3,0);   // A
+			          if(o3.l.v & 4)
+			            o3.l.v |= 0x20;
+			          if(o3.l.v & 2)
+			            o3.l.v |= 0x40;
+			          if(o3.l.v & 1)
+			            o3.l.v |= 0x80;
+			          o3.l.v &= 0xe0;     // i bit sono invertiti...
+						    if(o2.V==VQ_REGISTER) {
+						      if(o2.T == 0)
+			              PROCOut(mn->a[k].n | o3.l.v,0xff,o3.l.v,0);   // A
 			            else
-			              PROCOut(mn->a[k].n | l,0x80 | (Reg[T2].m - 1),l3,0);   // x,y,v,w
+			              PROCOut(mn->a[k].n | o3.l.v,0x80 | (Reg[o2.T].m - 1),o3.l.v,0);   // x,y,v,w
 			            }
 			          else
-			            PROCOut(mn->a[k].n | l,LOBYTE(LOWORD(l2)),l3,0);
+			            PROCOut(mn->a[k].n | o1.l.v,LOBYTE(LOWORD(o2.l.v)),o3.l.v,0);
 				        }
 				      else {
 				        if(Mnn==21 || Mnn==25) {  // gestisco set e res
-				          if(l & 4)
-				            l |= 0x20;
-				          if(l & 2)
-				            l |= 0x40;
-				          if(l & 1)
-				            l |= 0x80;
-				          l &= 0xe0;     // i bit sono invertiti...
-		  				    if(V2==VQ_REGISTER) {
+				          if(o3.l.v & 4)
+				            o3.l.v |= 0x20;
+				          if(o3.l.v & 2)
+				            o3.l.v |= 0x40;
+				          if(o3.l.v & 1)
+				            o3.l.v |= 0x80;
+				          o3.l.v &= 0xe0;     // i bit sono invertiti...
+		  				    if(o2.V==VQ_REGISTER) {
 					          k=subStmt(TS,ADDR_BIT,&mn);  
-					          PROCOut(mn->a[k].n | l,0x80 | (Reg[T].m - 1),-1,0);
+					          PROCOut(mn->a[k].n | o3.l.v,0x80 | (Reg[o1.T].m - 1),-1,0);
 					          }
 					        else {
 					          k=subStmt(TS,ADDR_BIT,&mn);  
-					          PROCOut(mn->a[k].n | l,LOBYTE(LOWORD(l2)),-1,0);
+					          PROCOut(mn->a[k].n | o3.l.v,LOBYTE(LOWORD(o2.l.v)),-1,0);
 					          }
 				          }
 				        else {
-		  				    if(V2==VQ_REGISTER) {
-		  				      if(Mnn != 19 && T2 !=0)      // a parte LDI, solo A puo' essere copiato in un indirizzo
+		  				    if(o2.V==VQ_REGISTER) {
+		  				      if(Mnn != 19 && o2.T !=0)      // a parte LDI, solo A puo' essere copiato in un indirizzo
 		  				        PROCError(2062,T2S);
 					          k=subStmt(TS,ADDR_17,&mn);  
-					          PROCOut(mn->a[k].n,l,-1,0);
+					          PROCOut(mn->a[k].n,o3.l.v,-1,0);
 					          }
 					        else {
-		  				      if(Mnn != 19 && T2 !=0)      // a parte LDI, solo A puo' essere copiato in un indirizzo
+		  				      if(Mnn != 19 && o2.T !=0)      // a parte LDI, solo A puo' essere copiato in un indirizzo
 		  				        PROCError(2062,T2S);
 					          k=subStmt(TS,ADDR_11,&mn);  
-					          PROCOut(mn->a[k].n,l,LOBYTE(LOWORD(l2)),0);
+					          PROCOut(mn->a[k].n,o3.l.v,LOBYTE(LOWORD(o2.l.v)),0);
 					          }
 					        }
 				        }  
@@ -4126,8 +4755,8 @@ y16bit:
           }
 			  }		// Is2
 			else {                                     // 1 solo parm
-		    if(V1>=VQ_OP_VAR) {
-		      if(Ind1) {
+		    if(o1.V>=VQ_OP_VAR) {
+		      if(o1.Ind) {
 		        goto nonInd1;   // accetto op. anche tra parentesi...
 			      }
 			    else {
@@ -4138,16 +4767,16 @@ nonInd1:
   			      if(k>=0) {
 //   fprintf(stderr,"\tCurAddr: l=%lx\n",l);
   			        if(Mnn>=11 && Mnn<=17) {                 // gestisco JR
-                  subBranch(TS,T2S,mn,T,k,l,FALSE);
+                  subBranch(TS,T2S,mn,o1.T,k,o3.l,FALSE);
   			          }
   			        else if(Mnn==4 || Mnn==11) {                           // gestisco CALL e JP 
-                  subBranch(TS,T2S,mn,T,k,l,FALSE);
+                  subBranch(TS,T2S,mn,o1.T,k,o3.l,FALSE);
 	  		          }
 	  		        else {
 	  		          if(Mnn == 5)   // gestisco CLR che e' finta!
-  				          PROCOut(mn->a[k].n,l,0,0);
+  				          PROCOut(mn->a[k].n,o3.l.v,0,0);
 	  		          else
- 	  			          PROCOut(mn->a[k].n,l,-1,0);
+ 	  			          PROCOut(mn->a[k].n,o3.l.v,-1,0);
 	  		          }
 	  		        }
   			      }
@@ -4156,28 +4785,28 @@ nonInd1:
   			      k=subStmt(TS,ADDR_14,&mn);         // jp ea31
   			      if(k>=0) {
 //   fprintf(stderr,"\tCurAddr: %lx, l=%lx T1S %s\n",CurAddr,l,T1S);
-                subBranch(TS,T2S,mn,T,k,l,FALSE);           // si autogestisce CALL, JP  e JR
+                subBranch(TS,T2S,mn,o1.T,k,o3.l,FALSE);           // si autogestisce CALL, JP  e JR
 	  		        }
   			      }
 				    }
 			    }
-			  else if(V1==VQ_REGISTER) {
-			    if(Ind1) {
-		        if(o1.S>1 || T>=2) {
+			  else if(o1.V==VQ_REGISTER) {
+			    if(o1.Ind) {
+		        if(o1.S>1 || o1.T>=2) {
 		          PROCError(2064,T1S);
 		          }
 		        else {              // inc (x)
-		          PROCOut(mn->a[k].n,(Reg[T].m-1) << 3,-1,0);
+		          PROCOut(mn->a[k].n,(Reg[o1.T].m-1) << 3,-1,0);
 		          }
 			      }
           else {
 				    if(o1.S==1) {
 				      if(Mnn==5 || Mnn==6 || Mnn==24 || Mnn==26) {   // quelle che vanno solo con A...
-				        if(T==0) {
+				        if(o1.T==0) {
 		  			      k=subStmt(TS,ADDR_IMPL,&mn);         // inc 
 		  			      if(k>=0) {
 		  		          if(Mnn == 5)   // gestisco CLR che e' finta!
-	  				          PROCOut(mn->a[k].n,l,0,0);
+	  				          PROCOut(mn->a[k].n,o1.l.v,0,0);
 		  		          else if(Mnn == 26)  // e SLA, pure
  	  			            PROCOut(mn->a[k].n,0xff,-1,0);
  	  			          else
@@ -4188,13 +4817,13 @@ nonInd1:
     		          PROCError(2062,T1S);
 				        }
 				      else {
-  			        if(T==0) {
+  			        if(o1.T==0) {
 	  			      	k=subStmt(TS,ADDR_IMM8,&mn);         // inc 
 	  		          PROCOut(mn->a[k].n,0xff,-1,0);
 	  		          }
   			        else {
 	  			      	k=subStmt(TS,ADDR_10,&mn);
-  		            PROCOut(mn->a[k].n | ((Reg[T].m-1) << 6));
+  		            PROCOut(mn->a[k].n | ((Reg[o1.T].m-1) << 6));
   		            }
 						    }
 					    }
@@ -5651,6 +6280,9 @@ no_short_addr3:
 #endif
 
 #if I8086
+		if(__line__==4309) {
+//				printf("BREAK a %u\n",__line__);
+				}
 	    if(Is2) {
 				if(o1.V==VQ_CONDIZ || o2.V==VQ_CONDIZ) 
           PROCError(2062,T1S);
@@ -5659,6 +6291,8 @@ no_short_addr3:
           }
 		    else if(o1.Ind) {
 					uint8_t t;
+
+pointer_senza_parentesi:
 					t=computeAddressing(o1.V,o1.T,o1.reg2reg,o1.l.v,T1S);
 	  	    if(o1.V>=VQ_OP_VAR) {
 	  	      if(o2.V>=VQ_OP_VAR) {                       //  mov ecc (),AL
@@ -5666,45 +6300,96 @@ no_short_addr3:
 								case 1:																// mov ecc (),nnn
 									k=subStmt(TS,ADDR_IND16REG_IMM8,&mn);  
 									if(k>=0) {
-										if(t & 0x40)		// se disp8
-											PROCOut((mn->a[k].n) | (t),
-												LOBYTE(LOWORD(o1.l.v)));    // 
-										else
-											PROCOut((mn->a[k].n) | (t),
-												LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+										if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+											(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 		  										PROCError(2067,T2S);
-												else
+												else {
+													if(t & 0x40)		// se disp8
+														PROCOut(0xC0,(mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));    // 
+													else {
+														if(o1.l.v)
+															PROCOut(0xC0,(mn->a[k].n) | (t),
+																LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+														else
+															PROCOut(0xC0,(mn->a[k].n) | (t));
+														}
 													PROCOut(LOBYTE(LOWORD(o2.l.v)));
+													}
+												}
+											else {
+												if(t & 0x40)		// se disp8
+													PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));    // 
+												else {
+													if(o1.l.v)
+														PROCOut((mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+													else
+														PROCOut((mn->a[k].n) | (t));
+													}
 												}
 											}
-										else
+										else {
+											if(t & 0x40)		// se disp8
+												PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));    // 
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n) | (t));
+												}
 											PROCOut(LOBYTE(LOWORD(o2.l.v)));
+											}
 										}                    
 									break;
 								case 2:                                      // mov ecc (),nnn
 									k=subStmt(TS,ADDR_IND16REG_IMM16,&mn);  
 									if(k>=0) {
-										if(t & 0x40)		// se disp8
-											PROCOut((mn->a[k].n) | (t),
-												LOBYTE(LOWORD(o1.l.v)));
-										else
-											PROCOut((mn->a[k].n) | (t),
-												LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+										if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+											(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 		  										PROCError(2067,T2S);
-												else
+												else {
+													if(t & 0x40)		// se disp8
+														PROCOut(0xC1,(mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+													else {
+														if(o1.l.v)
+															PROCOut(0xC1,(mn->a[k].n) | (t),
+																LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+														else
+															PROCOut(0xC1,(mn->a[k].n) | (t));
+														}
 													PROCOut(LOBYTE(LOWORD(o2.l.v)));
+													}
+												}
+											else {
+												if(t & 0x40)		// se disp8
+													PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+												else {
+													if(o1.l.v)
+														PROCOut((mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+													else
+														PROCOut((mn->a[k].n) | (t));
+													}
 												}
 											}
-										else
+										else {
+											if(t & 0x40)		// se disp8
+												PROCOut((mn->a[k].n) | (t),
+													LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		// no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n) | (t));
+												}
 											PROCOut(LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+											}
 										}                    
 									break;
 								case 4:                                      // gestire!
@@ -5717,21 +6402,24 @@ no_short_addr3:
 		  	      switch(o2.S) {
 								case 1:
 									if(t==6)			// non serve ma lo faccio per "pulizia"
-										k=subStmt(TS,ADDR_IND16_REG8,&mn);  
+										k=subStmt(TS,ADDR_IND16REG_REG8,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_REG8,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										// servirebbe aggiungere/gestire il tipo indirizzamento come ADDR_IND16REG_IMM8 ma ampliato... per ora faccio così in questi casi!
 										if(Reg[o2.T].m != 1)
   										PROCError(2062,T2S);
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v))); 	// no segm, sono disp16!
+												PROCOut((mn->a[k].n | 0x200) | (t),LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n | 0x200) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v))); 	// no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n | 0x200) | (t));
+												}
 											}
 										}
 									else {
@@ -5739,9 +6427,13 @@ no_short_addr3:
 											if(t & 0x40)		// se disp8
 												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
 													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v))); 	// no segm, sono disp16!
+											else {
+												if(o1.l.v)
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v))); 	// no segm, sono disp16!
+												else
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)));
+												}
 											}
 										}
 									break;
@@ -5750,17 +6442,20 @@ no_short_addr3:
 										k=subStmt(TS,ADDR_IND16REG_REG16,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_REG16,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										if(Reg[o2.T].m != 1)
   										PROCError(2062,T2S);
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut(((mn->a[k].n | 0x200) | (t)),
-													LOBYTE(LOWORD(o1.l.v))); 
-											else
-												PROCOut(((mn->a[k].n | 0x200) | (t)),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));	// no segm, sono disp16!
+												PROCOut(((mn->a[k].n | 0x200) | (t)),LOBYTE(LOWORD(o1.l.v))); 
+											else {
+												if(o1.l.v)
+													PROCOut(((mn->a[k].n | 0x200) | (t)),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));	// no segm, sono disp16!
+												else
+													PROCOut(((mn->a[k].n | 0x200) | (t)));
+												}
 											}
 										}
 									else {
@@ -5768,9 +6463,13 @@ no_short_addr3:
 											if(t & 0x40)		// se disp8
 												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
 													LOBYTE(LOWORD(o1.l.v))); 
-											else
-												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));	// no segm, sono disp16!
+											else {
+												if(o1.l.v)
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));	// no segm, sono disp16!
+												else
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)));
+												}
 											}
 										}
 									break;
@@ -5789,33 +6488,50 @@ no_short_addr3:
 										k=subStmt(TS,ADDR_IND16REG_IMM8,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_IMM8,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										if(k>=0) {
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 			  									PROCError(2067,T2S);
+												if(t & 0x40)		// se disp8
+													PROCOut(0xC0,(mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+												else {
+													if(o1.l.v) {
+														PROCOut(0xC0,(mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+														PROCOut(HIBYTE(LOWORD(o1.l.v)),LOBYTE(LOWORD(o2.l.v)));
+														}
+													else {
+														PROCOut(0xC0,(mn->a[k].n) | (t),		// VERIFICARE QUESTO!
+															LOBYTE(LOWORD(o2.l.v)));
+														}
+													}
 												}
-											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
-											if(o2.l.v > 1) {
-												if(CPULevel>=1)
-													PROCOut(LOBYTE(LOWORD(o2.l.v)));
+											else {
+												if(t & 0x40)		// se disp8
+													PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+												else {
+													if(o1.l.v)
+														PROCOut((mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+													else
+														PROCOut((mn->a[k].n) | (t));
+													}
 												}
 											}
 										}
 									else {
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n) | (t));
+												}
 											PROCOut(LOBYTE(LOWORD(o2.l.v)));
 											}
 										}
@@ -5825,33 +6541,50 @@ no_short_addr3:
 										k=subStmt(TS,ADDR_IND16REG_IMM16,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_IMM16,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										if(k>=0) {
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 		  										PROCError(2067,T2S);
+												if(t & 0x40)		// se disp8
+													PROCOut(0xC1,(mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+												else {
+													if(o1.l.v) {
+														PROCOut(0xC1,(mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+														PROCOut(HIBYTE(LOWORD(o1.l.v)),LOBYTE(LOWORD(o2.l.v)));
+														}
+													else {
+														PROCOut(0xC1,(mn->a[k].n) | (t),			// VERIFICARE QUESTO
+															LOBYTE(LOWORD(o2.l.v)));
+														}
+													}
 												}
-											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
-											if(o2.l.v > 1) {
-												if(CPULevel>=1)
-													PROCOut(LOBYTE(LOWORD(o2.l.v)));
+											else {
+												if(t & 0x40)		// se disp8
+													PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+												else {
+													if(o1.l.v)
+														PROCOut((mn->a[k].n) | (t),
+															LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+													else
+														PROCOut((mn->a[k].n) | (t));
+													}
 												}
-											}                    
+											} 
 										}
 									else {
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												PROCOut((mn->a[k].n) | (t),LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n) | (t));
+												}
 											PROCOut(LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
 											}                    
 										}
@@ -5869,26 +6602,33 @@ no_short_addr3:
 										k=subStmt(TS,ADDR_IND16REG_REG8,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_REG8,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										if(Reg[o2.T].m != 1)
   										PROCError(2062,T2S);
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												PROCOut((mn->a[k].n | 0x200) | (t),LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n | 0x200) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n | 0x200) | (t));
+												}
 											}
 										}
 									else {
 										if(t & 0x40)		// se disp8
 											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
 												LOBYTE(LOWORD(o1.l.v)));
-										else
-											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
-												LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+										else {
+											if(o1.l.v)
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)),
+													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+											else
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m) << 3)));
+											}
 										}
 									break;
 								case 2:
@@ -5896,26 +6636,33 @@ no_short_addr3:
 										k=subStmt(TS,ADDR_IND16REG_REG16,&mn);  
 									else
 										k=subStmt(TS,ADDR_IND16REG_REG16,&mn);  
-										if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 										if(Reg[o2.T].m != 1)
   										PROCError(2062,T2S);
 										if(k>=0) {
 											if(t & 0x40)		// se disp8
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)));
-											else
-												PROCOut((mn->a[k].n | 0x200) | (t),
-													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												PROCOut((mn->a[k].n | 0x200) | (t),LOBYTE(LOWORD(o1.l.v)));
+											else {
+												if(o1.l.v)
+													PROCOut((mn->a[k].n | 0x200) | (t),
+														LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut((mn->a[k].n | 0x200) | (t));
+												}
 											}
 										}
 									else {
 										if(t & 0x40)		// se disp8
 											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
 												LOBYTE(LOWORD(o1.l.v)));
-										else
-											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
-												LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+										else {
+											if(o1.l.v)
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)),
+													LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // no segm, sono disp16!
+											else
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o2.T].m -8) << 3)));
+											}
 										}
 									break;
 								case 4:
@@ -5925,8 +6672,9 @@ no_short_addr3:
 				        }                    
 				      }
 				    }
-					else
+					else {
 	          PROCError(2062,T1S);			// safety cmq!
+						}
 			    }		// Ind1
 		    else if(o2.Ind) {
 					uint8_t t;
@@ -5940,9 +6688,13 @@ no_short_addr3:
 										if(t & 0x40)		// se disp8
 											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
 												LOBYTE(LOWORD(o2.l.v)));
-										else
-											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
-												LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+										else {
+											if(o2.l.v)
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
+													LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+											else
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)));
+											}
 										}
 									}                    
 								else if(o2.V==VQ_REGISTER) {                         // mov ecc al,(bp)
@@ -5951,11 +6703,17 @@ no_short_addr3:
 										if(t & 0x40)		// se disp8
 											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
 												LOBYTE(LOWORD(o2.l.v)));
-										else
-											PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
-												LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+										else {
+											if(o2.l.v)
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)),
+													LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+											else
+												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m) << 3)));
+											}
 										}
 									}
+								else 
+				          PROCError(2062,T1S);			// safety cmq!
 								break;
 							case 2:                                      // mov ecc AX,()
 	  						if(o2.V>=VQ_OP_VAR) {
@@ -5981,9 +6739,13 @@ no_short_addr3:
 											if(t & 0x40)		// se disp8
 												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
 													LOBYTE(LOWORD(o2.l.v)));
-											else
-												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
-													LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+											else {
+												if(o2.l.v)
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
+														LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)));
+												}
 											}
 										}
 									}                    
@@ -5994,13 +6756,27 @@ no_short_addr3:
   											PROCError(2067,T2S);
 		 									k=subStmt(TS,ADDR_REG16_IND16,&mn);  
 											if(k>=0) {
-	 											PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+												if(t & 0x40)		// se disp8
+		 											PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)));
+												else {
+													if(o2.l.v)
+		 												PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+													else
+		 												PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3));
+													}
 												}
 											}
 										else {
 		 									k=subStmt(TS,ADDR_REG16_IND16,&mn);  
 											if(k>=0) {
-	 											PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+												if(t & 0x40)		// se disp8
+		 											PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)));
+												else {
+													if(o2.l.v)
+		 												PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+													else
+		 												PROCOut((mn->a[k].n) | (t) | ((Reg[o1.T].m -8) << 3));
+													}
 												}
 											}
 										}
@@ -6010,12 +6786,18 @@ no_short_addr3:
 											if(t & 0x40)		// se disp8
 												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
 													LOBYTE(LOWORD(o2.l.v)));
-											else
-												PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
-													LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+											else {
+												if(o2.l.v)
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)),
+														LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));    // no segm, sono disp16!
+												else
+													PROCOut(((mn->a[k].n) << 8) | (t | ((Reg[o1.T].m -8) << 3)));
+												}
 											}
 										}
 									}
+								else 
+				          PROCError(2062,T1S);			// safety cmq!
 								break;
 							case 4:                                      // gestire!
 									if(CPULevel<3)
@@ -6041,6 +6823,8 @@ no_short_addr3:
 	   								PROCOut(mn->a[k].n | (Reg[o1.T].m << 3));
 										}
 									}
+								else 
+				          PROCError(2062,T1S);			// safety cmq!
 								break;
 							case 2:                                      // mov ecc AX,()
 	  						if(o2.V>=VQ_OP_VAR) { 
@@ -6053,6 +6837,8 @@ no_short_addr3:
 	   								PROCOut(mn->a[k].n | (Reg[o1.T].m << 3));
 										}
 									}
+								else 
+				          PROCError(2062,T1S);			// safety cmq!
 								break;
 							case 4:                                      // gestire!
 									if(CPULevel<3)
@@ -6078,14 +6864,14 @@ no_short_addr3:
 		    							PROCOut(mn->a[k].n | (Reg[o1.T].m),LOBYTE(LOWORD(o2.l.v)));		// segmento??
 											}
 										}
-									else if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									else if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 	 									k=subStmt(TS,ADDR_REG8IMM,&mn);     // 
 										if(k>=0) {
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 		  										PROCError(2067,T2S);
-												PROCOut((mn->a[k].n) | (Reg[o1.T].m & 0xf),LOBYTE(LOWORD(o2.l.v)));
+												PROCOut(0xC0,(mn->a[k].n) | (Reg[o1.T].m & 0xf),LOBYTE(LOWORD(o2.l.v)));
 												}
 											else
 												PROCOut((mn->a[k].n) | (Reg[o1.T].m & 0xf));
@@ -6115,17 +6901,27 @@ no_short_addr3:
 										}
 									}                    
 								else if(o2.V==VQ_REGISTER) {                         // mov al,bl
-	  							if(o2.S>1) 
-	  								PROCError(2064,T2S);
+									if(Mnn==176)	{		// gestisco IN al,dx
+ 										k=subStmt(TS,ADDR_REG8REG,&mn);  
+										if(k>=0) {
+											if(Reg[o1.T].m != 0 || Reg[o2.T].m != 10)
+	  										PROCError(2062,T2S);
+ 											PROCOut(mn->a[k].n);
+											}
+										}
+									else {
+	  								if(o2.S>1) 
+	  									PROCError(2064,T2S);
+										}
 									if(Mnn==228) {			// gestisco MOV
 										k=subStmt(TS,ADDR_REG8IMM,&mn);  
 										if(k>=0) {
  											PROCOut(mn->a[k].n,(0xC0 | (Reg[o2.T].m & 0xf) << 3) | Reg[o1.T].m & 0xf);
 											}
 										}
-									else if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
-	 									k=subStmt(TS,ADDR_REG8IMM,&mn);     // 
+									else if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
+	 									k=subStmt(TS,ADDR_REG8REG,&mn);     // 
 										if(k>=0) {
 											if(Reg[o2.T].m != 1)
 	  										PROCError(2062,T2S);
@@ -6144,6 +6940,8 @@ no_short_addr3:
 								break;
 							case 2:
 		  					if(o2.V>=VQ_OP_VAR) {                       // mov ax,20
+									if(o2.S>2 && !CPass)
+	  								PROCWarn(2064,T2S);			// do warning qua, poi tronco!
 									if(Mnn==228) {			// gestisco MOV
 										if((Reg[o1.T].m >= 16 && Reg[o1.T].m <= 19) || (Reg[o1.T].m >= 40 && Reg[o1.T].m <= 41)) {			// se registro segmento
 											PROCError(2062,T2S);
@@ -6153,14 +6951,14 @@ no_short_addr3:
 		 									PROCOut(mn->a[k].n | ((Reg[o1.T].m & 0xf) -8),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)),o2.l.seg);    // con segm.
 											}
 										}
-									else if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									else if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 	 									k=subStmt(TS,ADDR_REG16IMM,&mn);  
 										if(k>=0) {
 											if(o2.l.v > 1) {
 												if(CPULevel<1)
 		  										PROCError(2067,T2S);
-												PROCOut(((0xC1) | (mn->a[k].n >> 8) | (Reg[o1.T].m & 0xf -8),LOBYTE(LOWORD(o2.l.v))));// provare!
+												PROCOut(((0xC1),(mn->a[k].n >> 8) | (Reg[o1.T].m & 0xf -8),LOBYTE(LOWORD(o2.l.v))));// provare!
 												}
 											else
 												PROCOut((mn->a[k].n) | ((Reg[o1.T].m & 0xf) -8));
@@ -6169,6 +6967,22 @@ no_short_addr3:
 		 									k=subStmt(TS,ADDR_IMM16,&mn);  
 											if(k>=0) {
 	 											PROCOut(mn->a[k].n,LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+												}
+											}
+										}
+									else if((Mnn==196 || Mnn==197 || Mnn==199 || Mnn==201 || Mnn==203)) {			// gestisco LEA LDS ecc
+										if(Mnn==201 || Mnn==203) {			// LFS LGS
+											if(CPULevel<1)
+  											PROCError(2067,T2S);
+		 									k=subStmt(TS,ADDR_REG16_IND16,&mn);  
+											if(k>=0) {
+	 											PROCOut((mn->a[k].n) | (0) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+												}
+											}
+										else {
+		 									k=subStmt(TS,ADDR_REG16_IND16,&mn);  
+											if(k>=0) {
+	 											PROCOut((mn->a[k].n) | (0) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
 												}
 											}
 										}
@@ -6224,12 +7038,12 @@ no_short_addr3:
  											PROCOut(0x8C,(0xC0 | ((Reg[o2.T].m & 0xf) -8) << 3) | (Reg[o1.T].m & 0xf -40));
 											}
 										else {
- 											k=subStmt(TS,ADDR_REG16IMM,&mn);  
+ 											k=subStmt(TS,ADDR_REG16IMM,&mn);  // usato 
  											PROCOut(mn->a[k].n,(0xC0 | ((Reg[o2.T].m & 0xf) -8) << 3) | (Reg[o1.T].m & 0xf -8));
 											}
 										}
-									else if((Mnn>=357 && Mnn<=358) || (Mnn>=370 && Mnn<=371) || 
-											(Mnn>=376 && Mnn<=377) || (Mnn==386) || (Mnn==388)) {			// gestisco SHR ROL ecc
+									else if((Mnn>=357 && Mnn<=358) || (Mnn>=372 && Mnn<=373) || 
+										(Mnn>=378 && Mnn<=379) || (Mnn==388) || (Mnn==390)) {			// gestisco SHR ROL ecc
 	 									k=subStmt(TS,ADDR_REG16REG,&mn);     // 
 										if(k>=0) {
 											if(Reg[o2.T].m != 1)
@@ -6277,6 +7091,22 @@ no_short_addr3:
 												break;
 											}
 										}
+									else if(Mnn==431)	{		// gestisco XCHG
+		  							if(o2.S != 2) 
+		  								PROCError(2064,T2S);
+										if(Reg[o1.T].m == 8) {		
+ 											k=subStmt(TS,ADDR_REG16,&mn);  
+											if(k>=0) {
+ 												PROCOut(mn->a[k].n | ((Reg[o2.T].m & 0xf) -8));
+												}
+											}
+										else {
+ 											k=subStmt(TS,ADDR_REG16REG,&mn);  
+											if(k>=0) {
+ 												PROCOut(mn->a[k].n,(0xC0 | ((Reg[o2.T].m & 0xf) -8) << 3) | (Reg[o1.T].m & 0xf -8));
+												}
+											}
+										}
 									else {
 		  							if(o2.S != 2) 
 		  								PROCError(2064,T2S);
@@ -6291,8 +7121,28 @@ no_short_addr3:
 									}
 								break;
 							case 4:		// gestire!
+								if((Mnn==196 || Mnn==197 || Mnn==199 || Mnn==201 || Mnn==203)) {			// gestisco LEA LDS ecc
+									if(Mnn==201 || Mnn==203) {			// LFS LGS
+
+										//verificare!
+										if(CPULevel<1)
+  										PROCError(2067,T2S);
+		 								k=subStmt(TS,ADDR_REG16_IND16,&mn);  
+										if(k>=0) {
+	 										PROCOut((mn->a[k].n) | (6) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+											}
+										}
+									else {
+		 								k=subStmt(TS,ADDR_REG16_IND16,&mn);  
+										if(k>=0) {
+	 										PROCOut((mn->a[k].n) | (6) | ((Reg[o1.T].m -8) << 3),LOBYTE(LOWORD(o2.l.v)),HIBYTE(LOWORD(o2.l.v)));
+											}
+										}
+									}
+								else {		// finire
 									if(CPULevel<3)
 										PROCError(2067,TS);
+									}
 								break;
 				      }
 				    }
@@ -6301,10 +7151,9 @@ no_short_addr3:
 							switch(o2.S) {
 								case 1:
 									if(Mnn==228) {			// gestisco MOV
-										k=subStmt(TS,ADDR_IMM8,&mn);  
-										if(k>=0) {
-											PROCOut(mn->a[k].n | o1.l.v << 3 | Reg[o2.T].m);
-											}
+										if(!CPass)
+											PROCWarn(2070,"indirizzamento MASM");
+									  goto pointer_senza_parentesi;		// MASM idioti...
 										}
 									else if(Mnn==274)	{		// gestisco OUT 
  										k=subStmt(TS,ADDR_REG8IMM,&mn);  
@@ -6323,10 +7172,9 @@ no_short_addr3:
 									break;
 								case 2:
 									if(Mnn==228) {			// gestisco MOV
-										k=subStmt(TS,ADDR_IMM16,&mn);  
-										if(k>=0) {
-											PROCOut(mn->a[k].n | o1.l.v << 3 | Reg[o2.T].m);
-											}
+										if(!CPass)
+											PROCWarn(2070,"indirizzamento MASM");
+								    goto pointer_senza_parentesi;		// MASM idioti...
 										}
 									else if(Mnn==274)	{		// gestisco OUT 
  										k=subStmt(TS,ADDR_REG16IMM,&mn);  
@@ -6350,7 +7198,10 @@ no_short_addr3:
 								}
 				      }
             else {			// safety
-              PROCError(2062,T1S);
+							if(!CPass)
+								PROCWarn(2070,"indirizzamento MASM");
+							goto pointer_senza_parentesi;		// MASM idioti...
+//              PROCError(2062,T1S);
 				      }
             }
           }
@@ -6369,8 +7220,12 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
   					else if(Mnn==351) {                 // gestisco PUSH
@@ -6382,20 +7237,20 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
-  					else if(Mnn==430) {                 // gestisco XLAT
-							if(t!=6)			// non serve ma lo faccio per "pulizia"
-		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
-							else
-		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+  					else if(Mnn==432) {                 // gestisco XLAT
+							if(t!=7)			// non serve ma lo faccio per "pulizia"
+								PROCError(2062);
+	  					k=subStmt(TS,ADDR_IND16REG_REG8,&mn);         // 
 							if(k>=0) {
-								if(t & 0x40)		// se disp8
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								PROCOut(mn->a[k].n);
 								}
   						}
   					else if(Mnn==74 || Mnn==177) {                 // gestisco INC,DEC
@@ -6407,8 +7262,12 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//((Reg[o1.T].m & 0xf) << 3)
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
 	  					}
   					else if(Mnn==262 || Mnn==175) {                 // gestisco MUL,IMUL
@@ -6419,8 +7278,12 @@ no_short_addr3:
 							if(k>=0) {
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
   					else if(Mnn==75 || Mnn==174) {                 // gestisco DIV,IDIV
@@ -6431,12 +7294,50 @@ no_short_addr3:
 							if(k>=0) {
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
-						else
-			        PROCError(2062,T1S);
+  					else if(Mnn==25 || Mnn==191) {                 // gestisco CALL,JMP
+							if(t!=6)			// non serve ma lo faccio per "pulizia"
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							else
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							if(k>=0) {
+								if(t & 0x40)		// se disp8
+									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
+								}
+  						}
+  					else if(Mnn==3 || Mnn==4 || Mnn==11 || Mnn==35 || Mnn==228 || Mnn==271 || Mnn==380 || Mnn==410 ||
+							Mnn==434) {                 // gestisco TUTTE quelle con 2 parm obbl! (c'è altro?
+		          PROCError(2071);
+  						}
+						else {
+							if(t!=6)			// non serve ma lo faccio per "pulizia"
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							else
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							if(k>=0) {
+								if(t & 0x40)		// se disp8
+									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
+								}
+  						}
 						}
 				  else if(o1.V==VQ_REGISTER) {
   					if(Mnn==313) {                 // gestisco POP
@@ -6448,8 +7349,12 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
   					else if(Mnn==351) {                 // gestisco PUSH
@@ -6461,21 +7366,20 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
-  					else if(Mnn==430) {                 // gestisco XLAT
-							if(t!=6)			// non serve ma lo faccio per "pulizia"
-		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
-							else
-		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+  					else if(Mnn==432) {                 // gestisco XLAT
+							if(t!=7)			// non serve ma lo faccio per "pulizia"
+								PROCError(2062);
+	  					k=subStmt(TS,ADDR_IND16REG_REG8,&mn);         // 
 							if(k>=0) {
-//								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//((Reg[o1.T].m & 0xf) << 3)
-								if(t & 0x40)		// se disp8
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								PROCOut(mn->a[k].n);
 								}
   						}
   					else if(Mnn==74 || Mnn==177) {                 // gestisco INC,DEC
@@ -6487,8 +7391,12 @@ no_short_addr3:
 //								PROCOut(mn->a[k].n, LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));		//((Reg[o1.T].m & 0xf) << 3)
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
 	  					}
   					else if(Mnn==262 || Mnn==175) {                 // gestisco MUL,IMUL
@@ -6499,8 +7407,12 @@ no_short_addr3:
 							if(k>=0) {
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
   					else if(Mnn==75 || Mnn==174) {                 // gestisco DIV,IDIV
@@ -6511,12 +7423,50 @@ no_short_addr3:
 							if(k>=0) {
 								if(t & 0x40)		// se disp8
 									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
-								else
-									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
 								}
   						}
-						else
-			        PROCError(2062,T1S);
+  					else if(Mnn==25 || Mnn==191) {                 // gestisco CALL,JMP
+							if(t!=6)			// non serve ma lo faccio per "pulizia"
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							else
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							if(k>=0) {
+								if(t & 0x40)		// se disp8
+									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t));
+									else
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									}
+								}
+  						}
+  					else if(Mnn==3 || Mnn==4 || Mnn==11 || Mnn==35 || Mnn==228 || Mnn==271 || Mnn==380 || Mnn==410 ||
+							Mnn==434) {                 // gestisco TUTTE quelle con 2 parm obbl! (c'è altro?
+		          PROCError(2071);
+  						}
+						else {
+							if(t!=6)			// non serve ma lo faccio per "pulizia"
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							else
+		  					k=subStmt(TS,ADDR_IND16REG_REG16,&mn);         // 
+							if(k>=0) {
+								if(t & 0x40)		// se disp8
+									PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)));
+								else {
+									if(o1.l.v)
+										PROCOut((mn->a[k].n) | (t), LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
+									else
+										PROCOut((mn->a[k].n) | (t));
+									}
+								}
+  						}
 			      }
           else {			// safety
             PROCError(2062,T1S);
@@ -6524,10 +7474,14 @@ no_short_addr3:
 					}
 			  else {
 			    if(o1.V>=VQ_OP_VAR) {
+  					if(Mnn==3 || Mnn==4 || Mnn==11 || Mnn==35 || Mnn==228 || Mnn==271 || Mnn==380 || Mnn==410 ||
+							Mnn==434) {                 // gestisco TUTTE quelle con 2 parm obbl! (c'è altro?
+		          PROCError(2071);
+  						}
   			    switch(o1.S) {
 							case 1:
 	//   fprintf(stderr,"\tCurAddr: %x, l=%lx\n",CurAddr,l);
- 								if(Mnn==1) {                              // gestisco AAD*
+ 								if(Mnn==1) {                              // gestisco AAD
  									if(o1.l.v<0 || o1.l.v>2)
  										PROCError(2062,T1S);
 	  							k=subStmt(TS,ADDR_IMM8,&mn);         // 
@@ -6553,16 +7507,17 @@ no_short_addr3:
 // 	  								PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)),o1.l.seg);    // con segm.
 	  							k=subStmt(TS,ADDR_IMM8,&mn);         // 
 									if(k>=0) {
-										subBranch(TS,T2S,mn,0,k,o1.l,FALSE);
+										subBranch(TS,T2S,mn,0,k,o1.l,FALSE,forcedSizeJmp);
 										}
 	  							}
   							else if(Mnn==212) {                           // gestisco LOOP
-									if(FNIsCond(TS+1)) {
-										if(CPULevel<3)
-											PROCError(2067,TS);
+									if(i=FNIsCond(TS+4)) {
+//											if(CPULevel<3)		// verificare sta cosa qua!
+										if(Cond[i].m != 5 && Cond[i].m != 6)
+											PROCError(2061,TS);
 										else {
 		  								k=subStmt(TS,ADDR_IMM8,&mn);         // 
-											subBranch(TS,T2S,mn,0,k,o1.l,FALSE);
+											subBranch(TS,T2S,mn,i-1,k,o1.l,TRUE);
 											}
 										}
 									else {
@@ -6589,7 +7544,7 @@ no_short_addr3:
 	  								PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)));
 										}
   								}
-  							else if(Mnn==430) {                 // gestisco XLAT
+  							else if(Mnn==432) {                 // gestisco XLAT
 			            PROCError(2064,T1S);
   								}
 								else {
@@ -6610,7 +7565,7 @@ no_short_addr3:
 	  							k=subStmt(TS,ADDR_IMM16,&mn);         // call nn
 									if(k>=0) {
 // 										PROCOut(mn->a[k].n,LOBYTE(l),HIBYTE(l));    // 
-										subBranch(TS,T2S,mn,0,k,o1.l,FALSE);
+										subBranch(TS,T2S,mn,0,k,o1.l,FALSE,Mnn==191 ? forcedSizeJmp : 0);
 										}
 	  							}
   							else if(Mnn==74 || Mnn==177) {                 // gestisco INC,DEC
@@ -6630,16 +7585,17 @@ no_short_addr3:
 	  								PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));
 										}
   								}
-  							else if(Mnn==430) {                 // gestisco XLAT
+  							else if(Mnn==432) {                 // gestisco XLAT
 			            PROCError(2064,T1S);
   								}
   							else if(Mnn==212) {                           // gestisco LOOP
-									if(FNIsCond(TS+1)) {
-										if(CPULevel<3)
-											PROCError(2067,TS);
+									if(i=FNIsCond(TS+4)) {
+//											if(CPULevel<3)		// verificare sta cosa qua!
+										if(Cond[i].m != 5 && Cond[i].m != 6)
+											PROCError(2061,TS);
 										else {
 	  									k=subStmt(TS,ADDR_IMM16,&mn);         // 
-											subBranch(TS,T2S,mn,0,k,o1.l,FALSE);
+											subBranch(TS,T2S,mn,i-1,k,o1.l,TRUE);
 											}
 										}
 									else {
@@ -6657,8 +7613,25 @@ no_short_addr3:
   							k=subStmt(TS,ADDR_IMM32,&mn);         // jmp far nn
   							if(k>=0) {
 	  							if(Mnn==191 || Mnn==25) {                 // gestisco JMP & CALL
+										if(forcedSizeJmp)
+											PROCError(2063);
  	  								PROCOut(mn->a[k].n,LOBYTE(LOWORD(o1.l.v)),HIBYTE(LOWORD(o1.l.v)));    // 
   									PROCOut(LOBYTE(HIWORD(o1.l.v)),HIBYTE(HIWORD(o1.l.v)),-1,o1.l.seg);    // con segm.
+  									}
+	  							else if(Mnn==212) {                           // gestisco LOOP
+										if(i=FNIsCond(TS+4)) {
+//											if(CPULevel<3)		// verificare sta cosa qua!
+											if(Cond[i].m != 5 && Cond[i].m != 6)
+												PROCError(2061,TS);
+											else {
+	  										k=subStmt(TS,ADDR_IMM32,&mn);         // 
+												subBranch(TS,T2S,mn,i-1,k,o1.l,TRUE);
+												}
+											}
+										else {
+	  									k=subStmt(TS,ADDR_IMM32,&mn);         // 
+											subBranch(TS,T2S,mn,0,k,o1.l,FALSE);
+											}
   									}
 									else {		// c'è altro a 32bit? o solo 386?
 										if(CPULevel>=3)
@@ -6671,6 +7644,10 @@ no_short_addr3:
   			      }
 				    }
 				  else if(o1.V==VQ_REGISTER) {
+  					if(Mnn==3 || Mnn==4 || Mnn==11 || Mnn==35 || Mnn==228 || Mnn==271 || Mnn==380 || Mnn==410 ||
+							Mnn==434) {                 // gestisco TUTTE quelle con 2 parm obbl! (c'è altro?
+		          PROCError(2071);
+  						}
 				    switch(o1.S) {
 							case 1:
   							if(Mnn==74 || Mnn==177) {                 // gestisco INC,DEC
@@ -6699,7 +7676,7 @@ no_short_addr3:
   								}
 								else {
 									if(Reg[o1.T].m<8) {
-	  								k=subStmt(TS,ADDR_REG8,&mn);         // or B
+	  								k=subStmt(TS,ADDR_REG8,&mn);         // or bl 
 	  								if(k>=0) {
 	  									PROCOut(mn->a[k].n | Reg[o1.T].m);
 		  								}
@@ -6845,23 +7822,39 @@ no_short_addr3:
 #endif
 
 		struct LINE_DEF *m;
-		if(m=FNMacro(TS)) {		// mettere controllo su se stessa per ricorsiva :)
+		FNLA(T1S);
+		if((m=FNMacro(TS)) && stricmp(T1S,"macro")) {		// mettere controllo su se stessa per ricorsiva :)
+			//  e serve controllo su parola che segue, per dichiarazioni stile MASM!
 			char *p;
 //			fprintf(stderr,"trovata macro %s",m->s);
-			strcpy(theMacro,m->s+strlen(m->s)+1);		// spostare in translate...
-			p=m->s;
+			if(CurrMacro)
+				PROCError(1007,"macro nidificate/ricorsive");		// fare :)
+
+			CurrMacro=m;
+			strcpy(theMacro,m->text);		// spostare in translate...
+			p=m->name;
 			while(isspace(*p))
 				p++;
 			while(iscsym /*isasym*/ (*p))		// salto "nome" macro
 				p++;
 
-	    if(OutList) {                         
-	      PROCOut1(">= ",m->s);
+	    if(OutList) { 
+//				while(m->vars) {		// buttar fuori anche i parametri...
+//					}
+				strcpy(TS,m->name);
+				strcat(TS," ");
+				strcat(TS,&theLine[theLinePtr]);
+//	      PROCOut1(">= ",m->name);			
+	      PROCOut1(">= ",TS);
 	      }
 			m->used++;
+			if(__line__==3930) {
+//				printf("BREAK a %u\n",__line__);
+				}
 			TranslateMacro(m,p,theMacro,&theLine[theLinePtr]);
 
 			inMacroExecuting=TRUE;
+			macroLineNumber=0;
 			theMacroPtr=0;
 			return TRUE;
 			}
@@ -6874,10 +7867,10 @@ soloIFS:
 	      break;
 	      }
 	    i++;
-	    };      
+	    }
 	  if(j) {
-	    if(UNDEFD) {
-//	    printf("ecco if UNDEFD\n");
+	    if(UNDEFD[IfDefs]) {
+//	    printf("ecco if UNDEFD[IfDefs]\n");
 	      if(MCom[i].m >= 0x8010 && MCom[i].m <= 0x801f)
 	        goto soloIFS801;
 	      else if(MCom[i].m >= 0x8020 && MCom[i].m <= 0x802f)
@@ -6886,7 +7879,9 @@ soloIFS:
 	        return TRUE;
 	      }
 		  if(OutList) {    
-		    PROCOut1(MCom[i].m & 0xffe0 ? "= " : "- ",theLine,FALSE);
+				if(!inStructDeclaration)				// esce anche per membri struct... togliere! o indicare diversamente
+
+					PROCOut1(MCom[i].m & 0xffe0 ? "= " : "- ",theLine,FALSE);
 		    }
 			n=0;
       switch(MCom[i].m >> 4) {
@@ -6894,6 +7889,8 @@ soloIFS:
 	        FNLA(myBuf);
 		      switch(MCom[i].m & 0xf) {
 						case 0:			// LABEL
+							LVars->type &= ~VAR_ADDRESS;
+							LVars->type |= VAR_LABEL;
 			        FNLO(myBuf);
 							if(!stricmp(myBuf,"BYTE")) {	// boh non trovo la descrizione in pdf, v.GLABios cmq
 								n=1;
@@ -6912,7 +7909,11 @@ soloIFS:
 						case 8:			// DQ
 do_db:
 							n=0;
-							do {                  
+		if(__line__==6199) {
+//				printf("BREAK a %u\n",__line__);
+				}
+	
+							do {        
 								long l;
 			//fprintf(stderr,"FNLA: %s\n",myBuf);
 								if(*myBuf == ',')
@@ -6924,6 +7925,7 @@ do_db:
 									FNLA(myBuf);
 
 									if(inStructDeclaration) {
+											PROCWarn(1007,"DUP su RECORD/STRUCT non supportato");
 										l=theLinePtr;
 										FNLO(myBuf);
 										if(!*myBuf || *myBuf==')')
@@ -6950,10 +7952,17 @@ do_db:
 											PROCError(2062);
 										PROCCheck(')');
 			//	fprintf(stderr,"EVALEXPR: %ld %s (l=%d)\n",l2,myBuf,l);  // mi sembra strano "l"... boh?
+
+// ? #pragma GESTIRE STRINGHE QUA!
+										VAR_STRING;
+
+
 										n+=LODWORD(o1.l.v);
 	//  								if(o2.l.v==-1   /*USARE? (!o2.l.valid)*/)                           // se è dup(?) avanzo solo il ptr
-  									if(!o2.l.valid)                           // se è dup(?) avanzo solo il ptr
+										if(!o2.l.valid) {                           // se è dup(?) avanzo solo il ptr
   										Seg[CurSeg-1].CurAddr += (LODWORD(o1.l.v)*(MCom[i].m & 0xf));
+											Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+											}
   									else { 
 											while(o1.l.v--)
 		  									n+=subBytes(myBuf,MCom[i].m,o2.l.v);
@@ -6965,92 +7974,108 @@ do_db:
 									FNLA(myBuf);
 
 									if(inStructDeclaration) {
-											if(*myBuf) {
-												FNLO(myBuf);
-												}
-											else {
-												FNLO(myBuf);
-												}
-											n= (MCom[i].m & 0xf);
-  										if(stricmp(FNLA(myBuf1),"DUP")) {
-												}
-											if(!CPass) {
-												LTag->size=n;		// OCCHIO se consentiamo membri anonimi (spero di no!)
-												if(((struct TAGS*)currVarTag)->type & VAR_UNION) {
-													LTag->pos=0;
-													((struct TAGS*)currVarTag)->size=max(((struct TAGS*)currVarTag)->size,n);
-													}
-												else {
-													LTag->pos=((struct TAGS*)currVarTag)->size;
-													((struct TAGS*)currVarTag)->size+=n;
-													}
-												}
+										if(*myBuf) {
 											FNLO(myBuf);
-
 											}
 										else {
-											if(*myBuf) {
-												char myBuf2[256];
-												long l;
-												l=theLinePtr;
-												FNLO(myBuf);
-												FNLA(myBuf2);
-												if((Seg[CurSeg-1].type & 0xff00) == (SEGMENT_BSS & 0xff00) && !CPass) {
-													if(!stricmp(myBuf2,"DUP")) {
-														FNLO(myBuf2);
-														PROCCheck('(');
-														FNLO(myBuf2);
-		//												if(*myBuf2 != '?')
-		//													PROCWarn(2103,"");
-														}
-													else {
-														if(*myBuf && *myBuf != '?')
-															PROCWarn(2103,"");
-														}
-													}
-												theLinePtr=l;
-												}
-											if(*myBuf) {
-												long l;
-												o1.l=FNEvalExpr(14,myBuf);
-												if(!o1.l.valid)
-													PROCError(2062);
-												FNLA(TS);
-		//										if(*myBuf != '?')
-		//											PROCError(2060,myBuf);
-												if(*TS) {
-													if(*TS == ',') {
-														l=theLinePtr;
-														FNLO(TS);
-														FNLA(TS);
-														if(!*TS) {
-															if(!CPass)
-																PROCWarn(1006,",");			// se virgola a fine riga...
-															}
-														else
-															theLinePtr=l;
-														}
-													}
+											FNLO(myBuf);
+											}
+										n= (MCom[i].m & 0xf);
+  									if(!stricmp(FNLA(myBuf1),"DUP")) {
+											PROCWarn(1007,"DUP su RECORD/STRUCT non supportato2");
+											}
+										if(!CPass) {
+											LTag->size=n;		// OCCHIO se consentiamo membri anonimi (spero di no!)
+											if(((struct TAGS*)currVarTag)->type & VAR_UNION) {
+												LTag->pos=0;
+												((struct TAGS*)currVarTag)->size=max(((struct TAGS*)currVarTag)->size,n);
 												}
 											else {
-												FNLO(myBuf);
-												o1.l.v=0xffffffffffffffff;
-
-												o1.l.valid=TRUE;		// cmq :)
-
-
-												o1.l.seg=SEG_NONE;		// VERIFICARE
-
-
-
-		//										isEOL=TRUE;
+												LTag->pos=((struct TAGS*)currVarTag)->size;
+												((struct TAGS*)currVarTag)->size+=n;
 												}
-  										if(stricmp(FNLA(myBuf1),"DUP")) {
-				//	fprintf(stderr,"EVALEXPR 2: %ld %s\n",l,myBuf);
+											}
+										FNLO(myBuf);
+
+										}
+									else {
+										if(*myBuf) {
+											char myBuf2[256];
+											long l;
+											l=theLinePtr;
+											FNLO(myBuf);
+											FNLA(myBuf2);
+											if((Seg[CurSeg-1].type & 0xff00) == (SEGMENT_BSS & 0xff00) && !CPass) {
+												if(!stricmp(myBuf2,"DUP")) {
+													FNLO(myBuf2);
+													PROCCheck('(');
+													FNLO(myBuf2);
+	//												if(*myBuf2 != '?')
+	//													PROCWarn(2103,"");
+													}
+												else {
+													if(*myBuf && *myBuf != '?')
+														PROCWarn(2103,"");
+													}
+												}
+											theLinePtr=l;
+											}
+										if(*myBuf) {
+											long l;
+											o1.l=FNEvalExpr(14,myBuf);
+											if(!o1.l.valid)
+												PROCError(2062);
+
+//												if(type & VAR_STRING) {
+												// fare...
+//													}
+
+											FNLA(TS);
+	//										if(*myBuf != '?')
+	//											PROCError(2060,myBuf);
+											if(*TS) {
+												if(*TS == ',') {
+													l=theLinePtr;
+													FNLO(TS);
+													FNLA(TS);
+													if(!*TS) {
+														if(!CPass)
+															PROCWarn(1006,",");			// se virgola a fine riga...
+														}
+													else
+														theLinePtr=l;
+													}
+												}
+											}
+										else {
+											FNLO(myBuf);
+											o1.l.v=0xffffffffffffffff;
+
+											o1.l.valid=TRUE;		// cmq :)
+
+
+											o1.l.seg=SEG_NONE;		// VERIFICARE
+
+
+											*(int*)myBuf=0;
+
+	//										isEOL=TRUE;
+											}
+  									if(stricmp(FNLA(myBuf1),"DUP")) {
+			//	fprintf(stderr,"EVALEXPR 2: %ld %s\n",l,myBuf);
+											if(*(int*)myBuf) {
+												char *str=myBuf;
+												if(/**str!='\'' &&*/ *str!='\"') {		// fa schifo ma è l'unico modo per distinguere tra numero, stringa var e stringa literal...
+													// altrimenti usare FNGetAritElem
+													str=*(char**)myBuf;
+													strmove(myBuf+1,str);
+													myBuf[0]='\"';
+													strcat(myBuf,"\"");
+													}
+												}
 do_dbs:
-
-													n+=subBytes(myBuf,MCom[i].m,o1.l.v);
-												}
+											n+=subBytes(myBuf,MCom[i].m,o1.l.v);
+											}
 										}
 									}
 								} while(*FNLA(myBuf));
@@ -7155,36 +8180,44 @@ do_dbs:
 
 // ago 24: mi pare SBAGLIATO (GD24032)! in bin non segue gli indirizzi ORG ecc... proviamo così
 										if(CreaHex || CreaBin) {		// 
-											if(Seg[CurSeg-1].type != SEGMENT_VIRT) {
-  											while(o1.l.v--)
-  												PROCOut(0);
-												}
-											else
+											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
+//2025 tolto, risistemando HEX  											while(o1.l.v--)
+//  												PROCOut(0);
 												Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+									      subOut(OUT_REPOS,o1.l.v);
+												}
+											else {
+												Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+												}
 	  		              }
-										else
+										else {
 											Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
+									      subOut(OUT_REPOS,o1.l.v);
+											}
   		              }
   		            else { 
     			          Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
-										if(Seg[CurSeg-1].type != SEGMENT_VIRT)
+										if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
 								      subOut(OUT_REPOS,(int32_t)(o1.l.v-o2.l.v));
 				            }
 				          }
-				        else
+				        else 
   			          Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v);
-								if(Seg[CurSeg-1].type == SEGMENT_VIRT) {		// questi hanno la base indicata...
+								Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+								if((Seg[CurSeg-1].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {		// questi hanno la base indicata...
 									if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
-										Seg[CurSeg-1].BaseAddr=LODWORD(o1.l.v);
+										Seg[CurSeg-1].BaseAddr=Seg[CurSeg-1].CurAddr;
 									else
-										Seg[CurSeg-1].BaseAddr=min(Seg[CurSeg-1].BaseAddr,LODWORD(o1.l.v) | Seg[CurSeg-1].BaseAddr);		// 
-  			          Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v) | Seg[CurSeg-1].BaseAddr;		// 
+										Seg[CurSeg-1].BaseAddr=min(Seg[CurSeg-1].BaseAddr,Seg[CurSeg-1].CurAddr | Seg[CurSeg-1].BaseAddr);		// 
+  			          Seg[CurSeg-1].CurAddr=Seg[CurSeg-1].CurAddr | Seg[CurSeg-1].BaseAddr;		// 
+									Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
 									}
 								else {
 									if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
-										Seg[CurSeg-1].BaseAddr=LODWORD(o1.l.v);
+										Seg[CurSeg-1].BaseAddr=Seg[CurSeg-1].CurAddr;
 									else
-										Seg[CurSeg-1].BaseAddr=min(Seg[CurSeg-1].BaseAddr,LODWORD(o1.l.v));		// 
+										Seg[CurSeg-1].BaseAddr=min(Seg[CurSeg-1].BaseAddr,Seg[CurSeg-1].CurAddr);		// 
 									}
 				        }
 //printf("curaddr=%d\n",Seg[CurSeg-1].CurAddr);
@@ -7201,8 +8234,10 @@ do_dbs:
 		            while(o2.l.v--)
 		              PROCOut(0);
 			          }
-			        else
+							else {
                 Seg[CurSeg-1].CurAddr=LODWORD(o3.l.v);
+								Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+								}
 		          break;
 		        case 2:     // block
 			        o2.l.v=Seg[CurSeg-1].CurAddr;
@@ -7214,8 +8249,10 @@ do_dbs:
   		          while(o1.l.v--)
   		            PROCOut(0);
 				        }
-				      else
+							else {
    							Seg[CurSeg-1].CurAddr+=LODWORD(o1.l.v);     // block
+								Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+								}
 		          break;
 		        }  
 		      break;
@@ -7227,14 +8264,16 @@ do_dbs:
 		    case 0x100:
 					FNLA(myBuf);
 		      switch(MCom[i].m & 0xf) {
+						uint8_t seg_attr;
 		        case 0:					// cseg/segment
 		          CurSeg=DefCSeg;
-							if(CreaHex || CreaBin) {
-								if(!CPass)
-									PROCWarn(1006,TS /*"CSEG"*/);		// però poi do warning di emissione dati :D vabbe'... decidersi!
-								}
 
 							if(!stricmp(myBuf,"ENDS")) {		// bah compatibilità con tutto :)
+								if(CreaHex || CreaBin) {
+									if(!CPass)
+										PROCWarn(1006,TS /*"CSEG"*/);		// però poi do warning di emissione dati :D vabbe'... decidersi!
+									}
+								CurSeg=SEG_UNDEFINED;
 								break;
 								}
 
@@ -7258,65 +8297,65 @@ do_dbs:
 //									}
 								}
 
-							if(!myBuf[0])		// 
-								;
+							seg_attr=0;
+							if(!myBuf[0])	{	// 
+								if(CreaHex || CreaBin) {
+									if(!CPass) {
+										PROCWarn(1006,TS /*"CSEG"*/);		// però poi do warning di emissione dati :D vabbe'... decidersi!
+										}
+									}
+								}
 							else if(!stricmp(TS,"SEGMENT"))	 {		// idem
-rifoseg:
 								FNLO(myBuf);
-								if(!stricmp(myBuf,"AT")) {		// gestire poi anche altri parm: ALIGN ecc https://learn.microsoft.com/en-us/cpp/assembler/masm/segment?view=msvc-170
-//An AT segment cannot contain any code or initialized data, but is useful for defining structures or
-// variables that correspond to specific far memory locations, such as a screen buffer or low memory
-									Seg[CurSeg-1].type=SEGMENT_VIRT;
-									o1.l=FNEvalExpr(14,myBuf); 
-									if(!o1.l.valid)
-										PROCError(2062,myBuf);
+								do {
+									if(!stricmp(myBuf,"AT")) {		// gestire poi anche altri parm: ALIGN ecc https://learn.microsoft.com/en-us/cpp/assembler/masm/segment?view=msvc-170
+	//An AT segment cannot contain any code or initialized data, but is useful for defining structures or
+	// variables that correspond to specific far memory locations, such as a screen buffer or low memory
+										Seg[CurSeg-1].type=SEGMENT_VIRT;
+										o1.l=FNEvalExpr(14,myBuf); 
+										if(!o1.l.valid)
+											PROCError(2062,myBuf);
 #if I8086
-									if(CPULevel<3)
-										o1.l.v <<= 16;		// il seg: nella word alta
-									else
-										;		// finire!
+										if(CPULevel<3)
+											o1.l.v <<= 16;		// il seg: nella word alta
+										else
+											;		// finire!
 #endif
-									goto cseg_addr;
-									}
-										// https://learn.microsoft.com/en-us/cpp/assembler/masm/segment?view=msvc-170
-								else if(!stricmp(myBuf,"ALIGN")) {		
+										goto cseg_addr;
+										}
+											// https://learn.microsoft.com/en-us/cpp/assembler/masm/segment?view=msvc-170
+									else if(!stricmp(myBuf,"ALIGN")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"STACK")) {		
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"STACK")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"COMMON")) {		
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"COMMON")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"MEMORY")) {		
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"MEMORY")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"PRIVATE")) {		
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"PRIVATE")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"PUBLIC")) {		
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"PUBLIC")) {		
 
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(!stricmp(myBuf,"READONLY")) {		
-
-									PROCError(1007,myBuf);
-									goto rifoseg;
-									}
-								else if(*myBuf) {
-									PROCError(2060,myBuf);
-									}
+										PROCError(1007,myBuf);
+										}
+									else if(!stricmp(myBuf,"READONLY")) {		
+										seg_attr |= 4;
+										}
+									else if(*myBuf) {
+										PROCError(2060,myBuf);
+										}
+									FNLO(myBuf);
+									} while(*myBuf);
 								}
 							else {		// SPOSTO base ma NON CREO byte!
 								o1.l=FNEvalExpr(14,myBuf); 
@@ -7324,7 +8363,12 @@ rifoseg:
 									PROCError(2062,myBuf);
 
 cseg_addr:
+								Seg[CurSeg-1].type &= ~seg_attr;
 								if(CreaHex || CreaBin) {
+									if(!CPass) {
+										if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
+											PROCWarn(1006,TS /*"CSEG"*/);		// però poi do warning di emissione dati :D vabbe'... decidersi!
+										}
 									o2.l.v=Seg[CurSeg-1].CurAddr;
   								if(CPass) {
   									if(o1.l.v>o2.l.v) {			// usare i LOWORD?! 16/3/25
@@ -7333,13 +8377,14 @@ cseg_addr:
   										}
   									else { 
     									Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
-											if(Seg[CurSeg-1].type != SEGMENT_VIRT)
+											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
 										    subOut(OUT_REPOS,(int32_t)(o1.l.v-o2.l.v));
 											}
 										}
 						      else
   					        Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v);
-									if(Seg[CurSeg-1].type == SEGMENT_VIRT) {		// questi hanno la base indicata...
+									Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+									if((Seg[CurSeg-1].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {		// questi hanno la base indicata...
 										if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
 											Seg[CurSeg-1].BaseAddr=LODWORD(o1.l.v);
 										else
@@ -7356,7 +8401,8 @@ cseg_addr:
 								else {
 //						        l2=Seg[CurSeg-1].CurAddr;
 									Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v);		// forse... o addr iniziale del segmento? boh, poco importa (C) :D
-									if(Seg[CurSeg-1].type == SEGMENT_VIRT) {		// questi hanno la base indicata...
+									Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
+									if((Seg[CurSeg-1].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {		// questi hanno la base indicata...
 										if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
 											Seg[CurSeg-1].BaseAddr=LODWORD(o1.l.v);
 										else
@@ -7381,6 +8427,7 @@ cseg_addr:
 								}
 
 							if(!stricmp(myBuf,"ENDS")) {		// bah compatibilità con tutto :)
+								CurSeg=SEG_UNDEFINED;
 								break;
 								}
 
@@ -7412,11 +8459,13 @@ cseg_addr:
 										}
 						      else
   					        Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v);
+									Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
 									break;
 									}
 								else {
 //						        l2=Seg[CurSeg-1].CurAddr;
 									Seg[CurSeg-1].CurAddr=LODWORD(o1.l.v);		// forse... o addr iniziale del segmento? boh, poco importa (C) :D
+									Seg[CurSeg-1].MaxAddr=max(Seg[CurSeg-1].CurAddr,Seg[CurSeg-1].MaxAddr);
 									if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
 										Seg[CurSeg-1].BaseAddr=LODWORD(o1.l.v);
 									else
@@ -7428,7 +8477,7 @@ cseg_addr:
 		          break;
 		        case 2:				// csect
 			        FNObbLO(myBuf);
-							if(CreaHex) {
+							if(CreaHex || CreaBin) {
 								if(!CPass)
 									PROCWarn(1006,"CSECT");
 								}
@@ -7439,7 +8488,7 @@ cseg_addr:
 			        break;
 		        case 3:				// dsect
 			        FNObbLO(myBuf);
-							if(CreaHex) {
+							if(CreaHex || CreaBin) {
 								if(!CPass)
 									PROCWarn(1006,"DSECT");
 								}
@@ -7453,7 +8502,7 @@ cseg_addr:
 								FNLO(myBuf);
 							else
 								strcpy(myBuf,defaultConstSegm);
-							if(CreaHex) {		// qua?
+							if(CreaHex || CreaBin) {		// qua?
 								if(!CPass)
 									PROCWarn(1006,"CONST");
 								if(CurSeg<0)
@@ -7469,7 +8518,7 @@ cseg_addr:
 								FNLO(myBuf);
 							else
 								strcpy(myBuf,defaultBSSSegm);
-							if(CreaHex) {		// qua?
+							if(CreaHex || CreaBin) {		// qua?
 								if(!CPass)
 									PROCWarn(1006,"BSS");
 								if(CurSeg<0)
@@ -7504,7 +8553,7 @@ cseg_addr:
 								o1.l.v=0x0000;
 
 #endif  
-							if(CreaHex) {		// qua? no, fare
+							if(CreaHex || CreaBin) {		// qua? no, fare
 								if(!CPass)
 									PROCWarn(1006,"ISR");
 								}
@@ -7523,7 +8572,7 @@ cseg_addr:
 								FNLO(myBuf);
 							else
 								strcpy(myBuf,"EEPROM_DATA");
-							if(CreaHex) {		// qua?
+							if(CreaHex || CreaBin) {	// qua?
 								if(!CPass)
 									PROCWarn(1006,"EEPROM");
 								if(CurSeg<0)
@@ -7542,9 +8591,10 @@ cseg_addr:
 			      case 0:			// PROC ENTRY   OCCHIO non passa mai di qua! v. sopra, verificare cmq 2025
 			        if(OutList)
 			          PROCOut1("=",NULL,FALSE);  // si legge meglio...
-			        FNLO(myBuf);
-		          if(CurProc)
-		            PROCError(2100,myBuf);
+			        FNLO(TS);
+//	    printf("PROC . %u %s\n",__line__,myBuf);
+		          if(CurProc[CurProcLevel])
+		            PROCWarn(2109,TS);
 			        FNLO(myBuf);
 							struct SEGMENTED_VALUE l;
 #if I8086
@@ -7558,37 +8608,112 @@ cseg_addr:
 							l.seg=CurSeg/*2025*/;
 #endif
 							l.v=-1;
-		          CurProc=PROCDclVar(myBuf,l,VAR_FUNZ,0);
+							CurProc[CurProcLevel++]=PROCDclVar((char*)(parm ? parm : TS),l,VAR_FUNZ | VAR_ADDRESS,0);
 #if I8086
-							if(!stricmp(myBuf,"FAR")) 
-								LVars->size += 2;		// da 16 a 32 bit cmq :)
+							if(!stricmp(myBuf,"FAR")) {
+								if(CPULevel<3) {
+									LVars->size = 4;		// da 16 a 32 bit
+									}
+								else {
+									LVars->size = 6;		// da 16+16 a 16+32 bit 
+									}
+								}
 #endif
 			        break;
 			      case 1:			// ENDP
-							if(!CurProc)
+							if(!CurProc[CurProcLevel-1])
 								PROCError(2108);
-			        FNLO(myBuf);
+							CurProcLevel--;
+			        FNLO(TS);
 				      if(IgnoreCase)
-				        strupr(myBuf);
-//			          printf("cproc: %Fs\n",CurProc->label);  
-							if(*myBuf) {
-								if(!strcmp(myBuf,CurProc->label)) {
-									CurProc->dim=Seg[CurSeg-1].CurAddr-CurProc->value;
-									CurProc=0;
+				        strupr(TS);
+//			          printf("cproc: %Fs\n",CurProc->name);  
+//	    printf("ENDP %u %s\n",__line__,TS);
+							if(*TS) {
+								if(!strcmp(TS,CurProc[CurProcLevel]->name)) {		// v. anche sopra
+
+									if(CurProc[CurProcLevel]->localUsed>0) {
+#if Z80
+										PROCOut(0xFDE3/*ex  (sp),iy*/);
+										sprintf(MyBuf,"> EX  (SP),IY\n");
+										PROCOut1(MyBuf);
+#elif I8051
+#elif ST62
+#elif _6502
+#elif PIC==16 || PIC==18
+#elif GD24032
+										PROCOut(/*LEAVE*/);
+										sprintf(myBuf,"> LEAVE\n");
+										PROCOut1(myBuf);
+#elif I8086
+										PROCOut(0xc9/*LEAVE*/);
+										sprintf(myBuf,"> LEAVE\n");
+										PROCOut1(myBuf);
+#endif
+										}
+									for(i=0; i<32; i++) {
+										if(CurProc[CurProcLevel]->regsSaved & (1 << i)) {
+#if Z80
+											PROCOut(0xc1/*POP*/ | (Reg[i].m << 4));		//  VERIFICARE!
+#elif I8051
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
+#elif ST62
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
+#elif _6502
+											if(i==0)
+												;
+											else if(Reg[i].m==1) {
+												PROCOut(0x68/*PLA*/);
+												PROCOut(0xAA/*TAX*/);		//  
+												}
+											else if(Reg[i].m==2)
+												PROCOut(0x68/*PLA*/);
+												PROCOut(0xA8/*TAY*/);		//  
+												}
+											else if(Reg[i].m==4)
+												PROCOut(0x12/*PLP*/);		// v. nota sopra PHP
+												}
+											else 
+												PROCError(2062,T1);
+											if(i)			// questo cmq, alla fine direi!
+												PROCOut(0x68/*PLA*/);
+#elif PIC==16 || PIC==18
+											PROCOut(/*MOVFW*/,i);		//  VERIFICARE! usare MOVFW+
+#elif GD24032
+											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE! usare LDMIA
+#elif I8086
+											if(i>=8 && i<16)
+												PROCOut(0x58/*POP*/ | (i-8));		//  
+											else if(i>=16 && i<20)
+												PROCOut(0x7/*POP*/ | ((i-16) << 3));		//  
+											else if(i<28)
+												;
+											sprintf(myBuf,"> POP %s\n","");
+											PROCOut1(myBuf);
+#endif
+											}
+										}
+
+									CurProc[CurProcLevel]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel]->value;
+									CurProc[CurProcLevel]=NULL;
 									}          
 								else 
-									PROCError(2108,myBuf);
+									PROCError(2108,TS);
 								}
 							else {
-								CurProc->dim=Seg[CurSeg-1].CurAddr-CurProc->value;
-								CurProc=0;
+								CurProc[CurProcLevel]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel]->value;
+		            CurProc[CurProcLevel]=NULL;
 								}
 //			        PROCError(2060,T1S);
 			        break;
 			      case 2:                      // end forza EOF!
-							if(CurProc)
-			          CurProc->dim=Seg[CurSeg-1].CurAddr-CurProc->value;
-			        CurProc=0;                 // vale anche come endp...
+							if(CurProcLevel>0) {
+								if(CurProc[CurProcLevel-1])
+									CurProc[CurProcLevel-1]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel-1]->value;
+								CurProc[CurProcLevel-1]=NULL;                 // vale anche come endp...
+
+								// FARLO PER TUTTE LE PROC nidificate, o non farlo del tutto, direi (v. anche warning in chiusura
+								}
 			        fseek(FIn,-1,SEEK_END);
 			        break;
 						}
@@ -7602,14 +8727,18 @@ cseg_addr:
 									PROCWarn(1006,"Public");		// ovvio! idem ma diciamo che può rimanere, non come extrn
 			        do {
 				        FNObbLO(myBuf);
-			          if(o1.var=FNCercaVar(myBuf,0,TRUE,CPass)) {
-			            o1.var->type |= VAR_PUBLIC | VAR_PUBLIC_DEFINED;
+			          if(o1.var=FNCercaVar(myBuf,0,0,TRUE,CPass)) {
+			            o1.var->type |= VAR_PUBLIC;
+									if(!(o1.var->type & VAR_PUBLIC_DEFINED)) {
+				            o1.var->type |= VAR_PUBLIC_DEFINED;
+										subOut(OUT_VAR_EXT,0);
+										}
 			            }
 			          else {  
 									struct SEGMENTED_VALUE l;
 									l.seg=SEG_NONE;
 									l.v=0;
-				          PROCDclVar(myBuf,l,VAR_PUBLIC,0);
+				          PROCDclVar(myBuf,l,VAR_PUBLIC | VAR_ADDRESS,0);
 				          }
 				        } while(*FNLO(myBuf) == ',');
 			        break;
@@ -7622,7 +8751,7 @@ cseg_addr:
 									struct SEGMENTED_VALUE l;
 									l.seg=SEG_EXTERN;
 									l.v=0;
-				          PROCDclVar(myBuf,l,VAR_EXTERN,0);
+				          PROCDclVar(myBuf,l,VAR_EXTERN | VAR_ADDRESS,0);
 				          }
 				        } while(*FNLO(myBuf) == ',');
 			        break;
@@ -7679,21 +8808,18 @@ cseg_addr:
 #endif
 #endif
 		        case 3:
-		          if(CPass) {
+//no		          if(CPass) {
 		            FNLO(myBuf);  // ignoro "out"
 			          do {
 			            FNLO(myBuf);
 //			            puts(myBuf);
-			            if(o1.var=FNCercaVar(myBuf,0,FALSE,1))
-			              printf("%ld ",o1.var->value);
+			            if(o1.var=FNCercaVar(myBuf,0,0,FALSE,1))
+			              printf("%lX ",o1.var->value);
 			            else  
 			              printf("%s ",myBuf);
 			            } while(*myBuf);
 	              putchar('\n');
-                }
-              else {
-//  	            fseek(FIn,FNGetLine(ftell(FIn)+4,myBuf),SEEK_SET);   // salto OUT
-                }  
+//                }
 		          break;
 		        case 4:          // eject
 					    PROCOut1("\f",NULL,FALSE);
@@ -7705,10 +8831,10 @@ cseg_addr:
 	              strcpy(myBuf,myBuf+1);
 	            if(myBuf[strlen(myBuf)-1] == '\"')
 	              myBuf[strlen(myBuf)-1]=0;
-					    PROCDclVar(myBuf,1,1,0);
+					    PROCDclVar(myBuf,o1.l,VAR_NUMBER,0);
 		          break;
 		        case 0x11:               // memoria a finestre
-					    PROCDclVar("W_ON",1,1,0);
+					    PROCDclVar("W_ON",o1.l,VAR_NUMBER,0);
 		          break;
 #endif		          
 #if PIC==16 || PIC==18
@@ -7727,8 +8853,9 @@ cseg_addr:
 							strcpy(myBuf,"_config");
 							CurSeg=PROCDclSeg(myBuf,SEGMENT_CONFIG);		// 
 							Seg[CurSeg-1].CurAddr=0;
+							Seg[CurSeg-1].MaxAddr=0;
 		          PROCOut(OUT_SEGM);
-		          PROCDclVar(myBuf,o1.l,0,0/*,myBuf*/);
+		          PROCDclVar(myBuf,o1.l,VAR_NUMBER,0/*,myBuf*/);
 		          PROCOut1("! ");
 							PROCOut(LOBYTE(o1.l.v),HIBYTE(o1.l.v),-1,i);
 		          break;
@@ -7739,8 +8866,9 @@ cseg_addr:
 							strcpy(myBuf,"_idlocs");
 							CurSeg=PROCDclSeg(myBuf,SEGMENT_IDLOCS);		// 
 							Seg[CurSeg-1].CurAddr=0;
+							Seg[CurSeg-1].MaxAddr=0;
 		          PROCOut(OUT_SEGM);
-		          PROCDclVar(myBuf,o1.l,0,0/*,myBuf*/);
+		          PROCDclVar(myBuf,o1.l,VAR_NUMBER,0/*,myBuf*/);
 		          PROCOut1("! ");
 							PROCOut(LOBYTE(o1.l.v),HIBYTE(o1.l.v),-1,i);
 		          break;
@@ -7748,53 +8876,108 @@ cseg_addr:
 		        }
 		      break;
 
-		    case 0x210:		//CPU
-#if I8086
+		    case 0x210:		//CPU (lo metto per tutti, poi dipenderà dalla singola CPU...
           o1.l=FNEvalExpr(14,myBuf);
-					// GESTIRE cose tipo 8086 80186 ecc!
 					if(!o1.l.valid)
 						PROCError(2062);
 					CPULevel=o1.l.v;
-#endif		          
 		      break;
+#if I8086
+		    case 0x211:		//CPU  80x86
+					CPULevel=MCom[i].m & 0xf;
+		      break;
+#endif		          
 
 		    case 0x400:
 		      switch(MCom[i].m & 0xf) {
+						struct LINE_DEF *M;
 						long l;
 						case 0:			// macro (alcuni usano MACRO <nome> ma sarebbe un problema da gestire, chissene
-							*T1S=0;
-							do {		///*** SI POTREBBE TOGLIERE! non mettiamo argomenti dopo nome macro
+							if(!parm) {		// serve come altrove per quando MACRO è prima opp dopo il nome!
 								FNLO(myBuf);
-								if(*T1S)
-									strcat(T1S," ");
-								strcat(T1S,myBuf);
-		//	    puts(myBuf);         // macro!
-								} while(*myBuf);
+								parm=myBuf;
+								}
+//bah							replace_char((char*)parm, '\t', ' ');		// per sicurezza!
+							if(!CPass) {
+								if(inLoop)
+									PROCError(1007,"macro/loop");		// 
+								if(*parm && FNMacro(parm))
+									PROCError(2012,parm);		// occhio verificare messaggio
+								M=PROCDefineMacro(parm,NULL);
+								*T1S=0;
+								do {		// (was: *** SI POTREBBE TOGLIERE! non mettiamo argomenti dopo nome macro, ma in MASM è così
+									FNLO(myBuf);
+									if(!*myBuf)
+										break;
+									FNAllocMacroVar(M,myBuf,0);		// 0 = parm
+									FNLA(myBuf);
+									if(*myBuf==',')
+										PROCCheck(',');
+									else {
+										if(*myBuf)
+											PROCError(1006,myBuf);
+										}
+									} while(*myBuf);
+								} 
+							else {
+								M=FNMacro(parm);
+								gotoEOL();
+								}
+							inMacroDeclaration=TRUE;
   						l=theLinePtr;
-							*T2S=0;
+
+							char bufMacro[MACRO_SIZE];			// FARE DINAMICO!
+							*bufMacro=0;
 							do {
 								char *p;
-								fgets(myBuf,255,FIn);
-		//      puts(myBuf);         // macro!
-								__line__++;
-								if(p=(char*)stristr(myBuf,"endm"))
+								memset(myBuf,0,sizeof(myBuf));		// serve pulire diciamo
+								if(!fgets(myBuf,255,FIn))
 									break;
-								if(*T2S)
-									strcat(T2S," ");
-								p=strchr(myBuf,'\r');
-								if(p)
-									*p=' ';
-								strcat(T2S,myBuf);
+								__line__++;
+								if(!CPass) {
+									p=(char*)parse_parm(myBuf,T1S);
+									if(!stricmp(T1S,"endm"))
+										break;
+									if(!stricmp(T1S,"local")) {		// in effetti (forse) si potrebbe/ro togliere dal testo della macro... 
+										do {
+											p=(char*)parse_parm(p,T1S);
+											FNAllocMacroVar(M,T1S,1);
+											if(!p)
+												break;
+											p=(char*)parse_parm(p,T1S);
+											if(!p)
+												break;
+											if(*T1S != ',')
+												PROCError(1006,T1S);
+											} while(p);
+										}
+
+									// BISOGNA pars-are le label e i parametri e salvare dentro la macro, per poterli poi cambiare all'esecuzione!
+									if(myBuf[0] != ';') {		// evitare ; all'inizio o salta il while dopo!
+										if(*bufMacro)
+											strcat(bufMacro," ");
+										if(p=strchr(myBuf,'\r')) {		// se capita...
+											if(*(p+1) != '\n')
+												*p='\n';
+											}
+										if(p=strchr(myBuf,';')) {		// direi
+											*p++='\n';
+											*p=0;
+											}
+										strcat(bufMacro,myBuf);
+										}
+									}
+								else {
+									p=(char*)parse_parm(myBuf,T1S);
+									if(!stricmp(T1S,"endm"))
+										break;
+									}
 								} while(*myBuf);
+							inMacroDeclaration=FALSE;
 							if(!CPass) {
 								char *p;
-								if(FNMacro(T1S))
-									PROCError(4005,T1S);
-								replace_char(T1S, '\t', ' ');		// per sicurezza!
-								if(p=strchr(T2S,';'))		// direi
-									*p=0;
-								replace_char(T2S, '\t', ' ');		// 
-								PROCDefineMacro(T1S,T2S);
+								replace_char(bufMacro, '\t', ' ');		// 
+								PROCRedefineMacro(M,bufMacro);
 								}
 							OldTextp=l;
 							break;
@@ -7802,10 +8985,110 @@ cseg_addr:
 							break;
 						case 2:			// endm :) gestito sopra
 							break;
-						case 3:			// local, fare...
+						case 3:			// local, fare... (cmq gestito sopra
+							// MA PARE SI POSSA USARE anche entro PROC, per creare variabili locali... boh :)
+							if(inMacroExecuting) {
+								gotoEOL();
+								}
+							else if(CurProc[CurProcLevel-1]) {
+								struct SEGMENTED_VALUE l;
+								l.seg=SEG_NONE;
+								do {
+									FNObbLO(TS);
+									PROCCheck(':');
+									FNObbLO(T1S);
+									if(!CPass) {
+										l.v=0;
+										PROCDclVar(TS,l,VAR_NUMBER,SEG_NONE);
+										LVars->proc=CurProc[CurProcLevel-1];
+										if(!stricmp(T1S,"BYTE"))
+											LVars->size=1;
+										else if(!stricmp(T1S,"WORD"))
+											LVars->size=2;
+										else if(!stricmp(T1S,"DWORD"))
+											LVars->size=4;
+										else
+											PROCError(2054,"tipo");
+										FNLA(TS);
+										if(!stricmp(TS,"PTR")) {
+											FNLO(TS);
+											LVars->size=PTR_SIZE;		// autogestisce CPUlevel
+											FNLA(TS);
+											}
+										LVars->value=CurProc[CurProcLevel-1]->localUsed;
+										CurProc[CurProcLevel-1]->localUsed+=LVars->size;
+										}
+									else {
+										FNLA(TS);
+										if(!stricmp(TS,"PTR")) {
+											FNLO(TS);
+											FNLA(TS);
+											}
+										}
+									if(*TS)
+										PROCCheck(',');
+									} while(*TS);
+#if Z80
+								l.v=(CurProc[CurProcLevel-1]->localUsed +1) & 0xfffe;		// word aligned
+								PROCOut(0xFD21/*ld  iy,nn*/,-LOBYTE(l.v),-HIBYTE(l.v));
+								sprintf(myBuf,"> LD IY,%u\n",-l.v);
+								PROCOut1(myBuf);
+								PROCOut(0xFD39/*add iy,sp*/);
+								sprintf(myBuf,"> ADD IY,SP\n");
+								PROCOut1(myBuf);
+								PROCOut(0xFDF9/*ld  sp,iy*/);		// (IY punta allo stack frame, v. casanet/videoteca/prova4
+								sprintf(myBuf,"> LD SP,IY\n");
+								PROCOut1(myBuf);
+								PROCOut(0xFD21/*ld  iy,nn*/,LOBYTE(l.v),HIBYTE(l.v));
+								sprintf(myBuf,"> LD IY,%u\n",l.v);
+								PROCOut1(myBuf);
+								PROCOut(0xFD39/*add iy,sp*/);
+								sprintf(myBuf,"> ADD IY,SP\n");
+								PROCOut1(myBuf);
+#elif I8051
+								PROCError(1007,"LOCAL (serve stack software?)");
+#elif ST62
+								PROCError(1007,"LOCAL (serve stack software)");
+#elif _6502
+								PROCError(1007,"LOCAL (serve stack software)");
+#elif PIC==16 || PIC==18
+								PROCError(1007,"LOCAL (serve stack software)");
+#elif GD24032
+								PROCOut(/*ENTER*/,LOBYTE(l.v),HIBYTE(l.v));
+								PROCOut(/*nested...*/);
+								sprintf(myBuf,"> ENTER %u\n",l.v);
+								PROCOut1(myBuf);
+#elif I8086
+								if(CPULevel<3)
+									l.v=(CurProc[CurProcLevel-1]->localUsed +1) & 0xfffe;		// word aligned
+								else
+									l.v=(CurProc[CurProcLevel-1]->localUsed +3) & 0xfffc;		// dword aligned
+								PROCOut(0xc8/*ENTER*/,LOBYTE(l.v),HIBYTE(l.v));
+								PROCOut(0/*nested...*/);
+								sprintf(myBuf,"> ENTER %u\n",l.v);
+								PROCOut1(myBuf);
+#endif
+								}
+							else 
+								PROCError(1006,"LOCAL");
 							break;
 						}
 					break;
+
+		    case 0x401:
+		      switch(MCom[i].m & 0xf) {
+						case 0:			// listmacro ecc
+							OutMacro=2;
+							break;
+						case 1:
+							OutMacro=1;
+							break;
+						case 2:
+							OutMacro=0;
+							break;
+						}
+					break;
+
 
 		    case 0x410:
 		      switch(MCom[i].m & 0xf) {
@@ -7820,9 +9103,9 @@ cseg_addr:
 							struct TAGS *myT;
 							if(!parm)
 								PROCError(1006,"ENDS");
-							if(myT=FNCercaAggr(parm,FALSE,0)) {
+							if(myT=FNCercaAggr(parm,0,0)) {
 								if(inStructDeclaration) {
-									if(!strcmp(myT->label,parm)) {
+									if(!strcmp(myT->name,parm)) {
 										inStructDeclaration=0;
 										currVarTag=0;
 										}
@@ -7879,11 +9162,18 @@ cseg_addr:
 
 		    case 0x801:
 soloIFS801:
+			if(__line__==5490) {
+//				printf("BREAK a %u\n",__line__);
+				}
 		      switch(MCom[i].m & 0xf) {
 						char myBuf2[256];
 		        case 0:                          // if
-							inIfDef=TRUE;
-		          IfDefs++;
+do_if:
+							if(UNDEFD[IfDefs]) {
+								bumpIfs(1,1,IfDefs);
+								gotoEOL();			// se no rischiamo di eseguire EvalExpr di var non definite!
+								break;
+								}
 				      FNLA(myBuf);
 		          switch(*myBuf) {
 	              case '@':		// uso questa per variabili predefinire (was: ma OCCHIO MACRO..., usano % per parm - MASM è diverso!
@@ -7892,8 +9182,7 @@ soloIFS801:
 										// anche CPASS pare, v.MASM...
 										case '1':
 										case '2':
-									    if(!UNDEFD)
-												UNDEFD=CPass == (*(myBuf+1) - '1');
+											bumpIfs(1,CPass == (*(myBuf+1) - '1'),IfDefs);
 											break;
 										default:
 				              PROCError(2065,myBuf);  
@@ -7903,7 +9192,7 @@ soloIFS801:
 		            default:
 				          o1.l=FNEvalExpr(14,myBuf);
 									if(!o1.l.valid) {
-										o1.var=FNCercaVar(myBuf,0,FALSE,1);   // cerco come se fosse PASS2
+										o1.var=FNCercaVar(myBuf,0,0,FALSE,1);   // cerco come se fosse PASS2
 										if(o1.var) {
 											o1.l.v=o1.var->value;
 											o1.l.valid=TRUE;
@@ -7916,121 +9205,108 @@ soloIFS801:
 				            o2.l=FNEvalExpr(14,myBuf);
 										if(!o2.l.valid)
 											PROCError(2062);
-										if(myBuf1[0]) {
-											myBuf1[0]=toupper(myBuf1[0]);
-											myBuf1[1]=toupper(myBuf1[1]);
-											switch(*(uint16_t*)myBuf1) {
-												case 'QE':
-													o1.l.v = o1.l.v==o2.l.v;
-													break;
-												case 'EN':
-													o1.l.v = o1.l.v!=o2.l.v;
-													break;
-												case 'TL':
-													o1.l.v = o1.l.v<o2.l.v;
-													break;
-												case 'TG':
-													o1.l.v = o1.l.v>o2.l.v;
-													break;
-												case 'EL':
-													o1.l.v = o1.l.v<=o2.l.v;
-													break;
-												case 'EG':
-													o1.l.v = o1.l.v>=o2.l.v;
-													break;
-												default:
-													PROCError(2062);
-													break;
-												}
-											}
-									//GESTIRE EQ NE GT LT LE GE ... stringhe... masm; e anche INSTR https://learn.microsoft.com/en-us/cpp/assembler/masm/instr?view=msvc-170
 										}
 
-//		              UNDEFD=!i;  idem 2025
-							    if(!UNDEFD)
-							      UNDEFD=!o1.l.v;
+									bumpIfs(1,!o1.l.v,IfDefs);
 
-//			            if(v1=FNCercaVar(myBuf,FALSE,1))
-//			              UNDEFD=!v1->value;
+//			            if(v1=FNCercaVar(myBuf,0,0,FALSE,1))
+//			              UNDEFD[IfDefs]=!v1->value;
 // fare...			            else if(v1=FNDefined(myBuf))
-//			              UNDEFD=0;
+//			              UNDEFD[IfDefs]=0;
 //			            else
 //			              PROCError(2065,myBuf);  
 			            break;
 		            }
-							inIfDef=FALSE;
 		          break;  
-		        case 1:						// ife
-		          IfDefs++;
+		        case 1:						// ife	( solo macro? cmq anche di là
 				      FNObbLO(myBuf);
-	            if(o1.var=FNCercaVar(myBuf,0,FALSE,1)) {   // cerco come se fosse PASS2
-						    if(!UNDEFD)
-		              UNDEFD=!!o1.var->value;
+	            if(o1.var=FNCercaVar(myBuf,0,0,FALSE,1)) {   // cerco come se fosse PASS2
+						    if(!UNDEFD[IfDefs])
+									bumpIfs(1,!!o1.var->value,IfDefs);
+								else
+									bumpIfs(1,1,IfDefs);
   	            }
 	            else
 	              PROCError(2065,myBuf);  
 	            break;
 		        case 2:						//ifdef
-		          IfDefs++;
 				      FNObbLO(myBuf);
-	            i=(int)FNCercaVar(myBuf,0,FALSE,1);
+	            i=(int)FNCercaVar(myBuf,0,0,FALSE,1);
 							if(!i)
 								i=(int)FNDefined(myBuf);		// cerco entrambe (NO sostituzione #define globale!)
-					    if(!UNDEFD)
-		            UNDEFD=!i;
+					    if(!UNDEFD[IfDefs])
+								bumpIfs(1,!i,IfDefs);
+							else
+								bumpIfs(1,1,IfDefs);
 		          break;
 		        case 3:						//ifndef
-		          IfDefs++;
 				      FNObbLO(myBuf);
-	            i=(int)FNCercaVar(myBuf,0,FALSE,1);
+	            i=(int)FNCercaVar(myBuf,0,0,FALSE,1);
 							if(!i)
 								i=(int)FNDefined(myBuf);		// cerco entrambe (NO sostituzione #define globale!)
-					    if(!UNDEFD)
-		            UNDEFD=!!i;
+					    if(!UNDEFD[IfDefs])
+								bumpIfs(1,!!i,IfDefs);
+							else
+								bumpIfs(1,1,IfDefs);
 		          break;
-		        case 4:						//ifdif
-		          IfDefs++;
+		        case 4:						//ifidn
+		        case 5:						//ifdif
+		        case 6:						//ifidni
+		        case 7:						//ifdifi
 				      FNObbLO(myBuf);
+							if(*myBuf=='<')
+					      FNObbLO(myBuf);
+				      FNLA(myBuf2);
+							if(*myBuf2=='>')
+								PROCCheck('>');
 							PROCCheck(',');
 				      FNObbLO(myBuf2);
-					    if(!UNDEFD)
-		            UNDEFD=!strcmp(myBuf,myBuf2);
+							if(*myBuf2=='<')
+					      FNObbLO(myBuf2);
+							if(!UNDEFD[IfDefs]) {
+					      switch(MCom[i].m & 0xf) {
+									case 4:
+										bumpIfs(1,strcmp(myBuf,myBuf2),IfDefs);
+										break;
+									case 5:
+										bumpIfs(1,!strcmp(myBuf,myBuf2),IfDefs);
+										break;
+									case 6:
+										bumpIfs(1,stricmp(myBuf,myBuf2),IfDefs);
+										break;
+									case 7:
+										bumpIfs(1,!stricmp(myBuf,myBuf2),IfDefs);
+										break;
+									}
+								}
+							else
+								bumpIfs(1,1,IfDefs);
 		          break;
-		        case 5:						//ifidn
-		          IfDefs++;
-				      FNObbLO(myBuf);
-							PROCCheck(',');
-				      FNObbLO(myBuf2);
-					    if(!UNDEFD)
-		            UNDEFD=strcmp(myBuf,myBuf2);
+		        case 8:						//ifb (solo dentro macro.. (cmq gestito di là
+		        case 9:						//ifnb (solo dentro macro.. (cmq gestito di là
+				      FNLO(myBuf);
+							if(*myBuf=='<')
+					      FNLO(myBuf);
+							if(*myBuf=='>')
+					      *myBuf=0;
+							if(!UNDEFD[IfDefs]) {
+					      if((MCom[i].m & 0xf) == 8) 
+									bumpIfs(1,!!(*myBuf),IfDefs);
+								else
+									bumpIfs(1,!(*myBuf),IfDefs);
+								}
 		          break;
-		        case 6:						//ifdifi
-		          IfDefs++;
-				      FNObbLO(myBuf);
-							PROCCheck(',');
-				      FNObbLO(myBuf2);
-					    if(!UNDEFD)
-		            UNDEFD=!stricmp(myBuf,myBuf2);
+		        case 0xa:						//if1 (idem
+					    if(!UNDEFD[IfDefs])
+								bumpIfs(1,!!CPass,IfDefs);
+							else
+								bumpIfs(1,1,IfDefs);
 		          break;
-		        case 7:						//ifidni
-		          IfDefs++;
-				      FNObbLO(myBuf);
-							PROCCheck(',');
-				      FNObbLO(myBuf2);
-					    if(!UNDEFD)
-		            UNDEFD=stricmp(myBuf,myBuf2);
-		          break;
-		        case 8:						//ifb (solo dentro macro..
-		          IfDefs++;
-				      FNObbLO(myBuf);
-					    if(!UNDEFD)
-		            UNDEFD=!!(*myBuf);
-		          break;
-		        case 9:						//ifnb (solo dentro macro..
-		          IfDefs++;
-				      FNObbLO(myBuf);
-					    if(!UNDEFD)
-		            UNDEFD=!(*myBuf);
+		        case 0xb:						//if2 (idem
+					    if(!UNDEFD[IfDefs])
+								bumpIfs(1,!CPass,IfDefs);
+							else
+								bumpIfs(1,1,IfDefs);
 		          break;
 		        }
 		      break;    
@@ -8041,19 +9317,16 @@ soloIFS802:
 		        case 0:                          // else
 			        if(!IfDefs)
 			          PROCError(1019);
-			        UNDEFD = !UNDEFD;      
+					    if(!UNDEFD[IfDefs-1])
+								bumpIfs(0,!UNDEFD[IfDefs],IfDefs);
 		          break;
 		        case 1:                          // elseif
-// finire!			        if(!IfDefs)
+			        if(!IfDefs)
 			          PROCError(1019);
-			        UNDEFD = !UNDEFD;      
+							goto do_if;
 		          break;
 		        case 0xf:                          // endif
-			        if(!IfDefs)
-			          PROCError(1020);
-			        IfDefs--;
-			        if(!IfDefs)
-			          UNDEFD=FALSE;
+							bumpIfs(-1,UNDEFD[IfDefs-1],IfDefs);
 		          break;
 		        }
 		      break;  
@@ -8073,6 +9346,39 @@ soloIFS802:
 		        }
 		      break;  
 
+		    case 0x804:
+		      switch(MCom[i].m & 0xf) {
+		        case 0:						//rept   secondo MASM 6 va avanti il blocco fino a ENDM
+		          o1.l=FNEvalExpr(14,myBuf);
+							if(!o1.l.valid)
+								PROCError(2071);
+							inLoop=o1.l.v;
+							memset(theLine,0,sizeof(theLine));		// mah boh sì, o usae 2 flag inLoop
+							fgets(theLine,1023,FIn);
+							__line__++;
+		          break;
+		        case 1:						//while, idem
+		          o1.l=FNEvalExpr(14,myBuf);
+							if(!o1.l.valid)
+								PROCError(2071);
+							PROCError(1007,"while");
+							inWhile=o1.l.v;
+							memset(theLine,0,sizeof(theLine));		// 
+							fgets(theLine,1023,FIn);
+							__line__++;
+		          break;
+		        case 2:						//FOR/FORC fare
+		          o1.l=FNEvalExpr(14,myBuf);
+							if(!o1.l.valid)
+								PROCError(2071);
+							PROCError(1007,"FOR");
+							inFor=o1.l.v;
+							memset(theLine,0,sizeof(theLine));		// 
+							fgets(theLine,1023,FIn);
+							__line__++;
+		          break;
+		        }
+		      break;  
 
 		    case 0x808:			// pragma
 					printf("pragma %s ignored\n",myBuf);			//:)
@@ -8097,6 +9403,20 @@ soloIFS802:
 								if(FCod)
     							fprintf(FCod,"WARNING: %s\n",p);
 				      break;    
+		        case 2:                          // ERR1
+							if(!CPass)
+								goto throw_err;
+							break;
+							// else continue
+		        case 3:                          // ERR2
+							if(CPass) {
+throw_err:
+								p=strchr(theLine,' ');
+								if(p)
+									p++;
+								PROCError(4099,p);
+								}
+							break;
 		        case 1:                          // error
 							p=strchr(theLine,' ');
 							if(p)
@@ -8119,7 +9439,7 @@ soloIFS802:
 		  }
 	  else {
 noStmt:
-			if(*TS && !UNDEFD) {
+			if(*TS && !UNDEFD[IfDefs]) {
 				theLinePtr=OldTextp;
   	    bInizioRiga=oi;
 				VarDeclared=FALSE;		// controllare oi?
@@ -8157,14 +9477,12 @@ char *FNGetConst(char *s) {
   return NULL;
   }
  
-struct VARS *FNCercaVar(const char *n,uint32_t parent,uint8_t m,uint8_t pass) {
+struct VARS *FNCercaVar(const char *n,uint32_t parentProc,uint32_t parentTag,uint8_t m,uint8_t pass) {
 // M% TRUE=RICERCA NEL BLOCCO, FALSE RICERCA GLOBALE
   int i,Bl;
   char F[256],myN[MAX_NAME_LEN+2];
   struct VARS *V;
 
-//  V=Var;
-//  while(V) {
 	strcpy(myN,n);
 	if(IgnoreCase) 
 		strupr(myN);
@@ -8180,8 +9498,8 @@ struct VARS *FNCercaVar(const char *n,uint32_t parent,uint8_t m,uint8_t pass) {
 	V=Var;
 	if(!V)
 	  return 0;
-	while(i=strcmp(myN,V->label) /*|| (parent!=V->tag)*/) {
-//		  printf("trovo... %Fs\n",V->label);
+	while(i=strcmp(myN,V->name) /*|| (parent!=V->tag)*/) {
+//		  printf("trovo... %Fs\n",V->name);
 		if(i<0)
 		  V=V->left;         // Esegue la ricerca
 		else
@@ -8189,8 +9507,23 @@ struct VARS *FNCercaVar(const char *n,uint32_t parent,uint8_t m,uint8_t pass) {
 		if(!V)
 		  return NULL;
 		}
-	if(parent && parent != V->tag)
-		V=V->next;
+	if(parentProc) {			// questo ha la priorità, del "blocco"
+		if(parentProc != (uint32_t)V->proc) {
+			V=V->next;
+			if(!V)
+				return NULL;
+
+			// ev. cercare TAG "privata" dentro proc qua??
+
+			}
+		}
+	if(parentTag) {
+		if(parentTag != V->tag) {
+			V=V->next;
+			if(!V)
+				return NULL;
+			}
+		}
 //		  printf("trovo...\n");
 		
 //  if(m && V->proc!=CurProc)         // var. locali supportate?
@@ -8210,9 +9543,9 @@ struct VARS *FNCercaVar(const char *n,uint32_t parent,uint8_t m,uint8_t pass) {
 
 	  	    // questo valore viene usato da subOut(-2..) per numerare le extrn usate in un segm.
 	  	    if(!V->lpos) {
-			      V->lpos=OldOffNome+strlen(Seg[CurSeg-1].label)+1;
-						OldOffNome+=strlen(V->label)+1;
-//						printf("uso: %Fs, ofsnome= %lx, sommo %s\n",V->label,V->lpos,Seg[CurSeg-1].label);
+			      V->lpos=OldOffNome+strlen(Seg[CurSeg-1].name)+1;
+						OldOffNome+=strlen(V->name)+1;
+//						printf("uso: %Fs, ofsnome= %lx, sommo %s\n",V->name,V->lpos,Seg[CurSeg-1].name);
 						}
 //				  printf("numextrn vale %d \n",NumExtrnUsed);
 			    }
@@ -8234,8 +9567,13 @@ struct VARS *PROCDclVar(char *nome, struct SEGMENTED_VALUE lv, uint16_t type, ui
   
   if(IgnoreCase)
     strupr(nome);
-  v=FNCercaVar(nome,tag,TRUE,CPass);     // SE LA VARIABILE GIA' ESISTE...
+  v=FNCercaVar(nome,0,tag,TRUE,CPass);     // SE LA VARIABILE GIA' ESISTE...
+// usare curproc qua??
+
+
   if(!CPass) {
+		if(AllPublics && CurSeg != SEG_NONE && CurSeg != SEG_UNDEFINED)
+			type |= VAR_PUBLIC;
 	  if(v) {
 	    if(((v->type & (VAR_PUBLIC | VAR_FUNZ | VAR_PUBLIC_DEFINED)) != VAR_PUBLIC) || (type & VAR_EXTERN))
 	    // lascio passare le public ridefinite ma blocco eventuali extern
@@ -8250,15 +9588,16 @@ struct VARS *PROCDclVar(char *nome, struct SEGMENTED_VALUE lv, uint16_t type, ui
 		    }
 		  v->type=0;
 			v->dim=0;
+			v->localUsed=v->regsSaved=0;
 		  
 /*		  if(CurProc) {			// C'E' QUALCHE PROBLEMA...v. anche sopra
 	  	  sprintf(MyBuf,"$%lx_%s",CurProc,nome);
-	  	  _fstrncpy(v->label,MyBuf,MAX_NAME_LEN);
+	  	  _fstrncpy(v->name,MyBuf,MAX_NAME_LEN);
 	  	  }
 		  else*/
-  		  strncpy(v->label,nome,MAX_NAME_LEN);
+  		  strncpy(v->name,nome,MAX_NAME_LEN);
   		  
-//printf("dichiaro %s\n",v->label);  		  
+//printf("dichiaro %s\n",v->name);  		  
 		  Var=PutOnTree(Var,Var,v);
 		  LVars=v;
 		  }
@@ -8281,6 +9620,9 @@ struct VARS *PROCDclVar(char *nome, struct SEGMENTED_VALUE lv, uint16_t type, ui
 			else if(type & VAR_RECORD) {
 				v->size=((struct TAGS*)tag)->size/8;
 				}
+			else if(type & VAR_ARRAY) {
+				v->size=0;			// FARE!
+				}
 			else {
 #if GD24032
 				v->size=8;
@@ -8289,6 +9631,31 @@ struct VARS *PROCDclVar(char *nome, struct SEGMENTED_VALUE lv, uint16_t type, ui
 #endif
 				}
 	    }
+		else if(type & VAR_STRING) {
+			const char *s=(const char *)lv.v;
+			char *p;
+			if(segm) {		// FINIRE... era un'idea per mettere in CONST ecc in base al tipo di dichiarazione/label 2024
+//				i=FNCercaSeg(segm);
+				i=PROCDclSeg(segm,SEGMENT_DATA);		// mah
+				v->segm=i; 
+				}
+			else {
+				v->segm=SEG_NONE;  // bah qua direi ovvio   CurSeg; 
+				}
+			if(*s=='"') {
+				s++;
+				if(p=strchr(s,'"'))
+					*p=0;
+				}
+			else if(*s=='\'') {
+				s++;
+				if(p=strchr(s,'\''))
+					*p=0;
+				}
+			v->size=strlen(s);
+			v->value=(int)(char*)malloc(v->size+1);
+			strcpy((char*)v->value,s);
+			}
 	  else {
 	    v->value=lv.v;
 			v->segm=SEG_NONE;
@@ -8311,20 +9678,20 @@ struct VARS *PROCDclVar(char *nome, struct SEGMENTED_VALUE lv, uint16_t type, ui
 			}
 	  else  
 	    v->type |= type;
-   	if((v->type & (VAR_PUBLIC | VAR_LABEL)) == (VAR_PUBLIC | VAR_LABEL)) {
+   	if((v->type & (VAR_PUBLIC | VAR_ADDRESS)) == (VAR_PUBLIC /*| VAR_ADDRESS*/)) {
 // 	    PublicEQU=TRUE;
     	i=PROCDclSeg(defaultAbsSegm,SEGMENT_ABS);
 //			v->value=MAKELONG(v->value,MAKEWORD(0,i));
 			v->segm=i;
 			}
-	  v->proc=CurProc;
+	  v->proc=CurProc[CurProcLevel];
     v->lpos=0l;
     v->extUsed=0;
     }
 	  
   if(FMap && !CPass)
-		fprintf(FMap,"-\t%-32s\t%6X:%04X\t%4X\t%4X\t%s (%s:%u)\n",v->label,
-			HIWORD(v->value),LOWORD(v->value),v->type,v->size,v->proc ? v->proc->label : ((char *)""),
+		fprintf(FMap,"-\t%-32s\t%10X:%08X\t%4X\t%4X\t%s (%s:%u)\n",v->name,
+			LOWORD(v->segm),v->value,v->type,v->size,v->proc ? v->proc->name : ((char *)""),
 			__file__,__line__);
 	// FARE anche in ordine alfabetico...
 
@@ -8349,7 +9716,7 @@ const struct TAGS *FNCercaAggr2(const char *n,const struct TAGS *V,uint8_t mode)
 		V2=V2->next;
 	level=0;
 	while(V2) {
-		if(!strcmp(n,V2->label))
+		if(!strcmp(n,V2->name))
 			return V2;
 		level++;
 		V2=V2->next;
@@ -8373,7 +9740,7 @@ struct TAGS *FNCercaAggr(const char *n,uint8_t bWhat,uint32_t parent) {		// anch
 			if(parent) {
 				V=(struct TAGS*)parent;
 				while(V) {
-					if(!strcmp(myN,V->label)) {
+					if(!strcmp(myN,V->name)) {
 						break;
 						}
 					V=V->next;
@@ -8383,8 +9750,8 @@ struct TAGS *FNCercaAggr(const char *n,uint8_t bWhat,uint32_t parent) {		// anch
 				V=StrTag;
 				if(!V)
 					return 0;
-				while(i=strcmp(myN,V->label) /*|| (parent!=V->tag)*/) {
-			//		  printf("trovo... %Fs\n",V->label);
+				while(i=strcmp(myN,V->name) /*|| (parent!=V->tag)*/) {
+			//		  printf("trovo... %Fs\n",V->name);
 					if(i<0)
 						V=V->left;         // Esegue la ricerca
 					else
@@ -8416,7 +9783,7 @@ struct TAGS *PROCDclAggr(char *nome, uint16_t type, uint32_t tag, NUM_TYPE val) 
   
   if(IgnoreCase)
     strupr(nome);
-  v=FNCercaAggr(nome,tag ? (type & VAR_RECORD ? TRUE : FALSE) : FALSE,currVarTag);     // SE LA VARIABILE GIA' ESISTE... (lo spazio dei RECORD è globale...
+  v=FNCercaAggr(nome,tag ? (type & VAR_RECORD ? 1 : 0) : FALSE,currVarTag);     // SE LA VARIABILE GIA' ESISTE... (lo spazio dei RECORD è globale...
   if(!CPass) {
 		v=(struct TAGS *)malloc(sizeof(struct TAGS)); 
 		if(!v) {
@@ -8430,7 +9797,7 @@ struct TAGS *PROCDclAggr(char *nome, uint16_t type, uint32_t tag, NUM_TYPE val) 
 
 		v->tag=tag;
 		
- 		strncpy(v->label,nome,MAX_NAME_LEN);
+ 		strncpy(v->name,nome,MAX_NAME_LEN);
 //		v->parent=parent;
   		
 		v->next=NULL;
@@ -8457,14 +9824,15 @@ struct TAGS *PROCDclAggr(char *nome, uint16_t type, uint32_t tag, NUM_TYPE val) 
   }
 
 NUM_TYPE FNUpdAggr(struct TAGS *V) {
-	struct TAGS *V2=V;
+	struct TAGS *V2=V->next;
 	NUM_TYPE n;
+	uint8_t rembits=(uint8_t)V->size;
 
 	n=0;
 	while(V2) {
-//		V->value |= V2->value >> V2->pos;
-		n <<= V2->pos;
-		n |= V2->value;
+		rembits -= V2->size;
+		n |= V2->value << (rembits);
+
 		V2=V2->next;
 		}
 	return n;
@@ -8484,8 +9852,10 @@ NUM_TYPE FNInitAggr(struct TAGS *V,bool mode) {		// inizializza Record
 	NUM_TYPE n=0;
 	char T1[256],MyBuf[256];
 	struct SEGMENTED_VALUE l;
-	uint8_t rembits=8;
+	uint8_t rembits=(uint8_t)V->size;
+	uint16_t dupSize=0;
 
+rifo:
 	FNLA(MyBuf);
   switch(*MyBuf) {
 		case '<':
@@ -8498,17 +9868,26 @@ NUM_TYPE FNInitAggr(struct TAGS *V,bool mode) {		// inizializza Record
 				FNLA(T1);
 				if(isalnum(*T1)) {
 					l=FNEvalExpr(14,T1);
+is_number:
 					if(*FNLA(T1) == ',')
 						PROCCheck(',');
 					if(l.v > getMask(V2->size)) {
 						if(!CPass)
 							PROCWarn(2058);
-//						l.v = getMask(V2->size);		// tronco al max!
+						l.v = getMask(V2->size);		// tronco al max!
 						}
 					}
-				else
+				else if(*T1=='\'') {
+					FNLO(T1);
+					l.v=FNGetASCII(T1);
+					goto is_number;
+					}
+				else {
 					l.v=V2->value;
-				l.v &= getMask(V2->size);			// tronco al max!
+					if(*T1==',')
+						PROCCheck(',');
+					}
+				l.v &= getMask(V2->size);			// tronco al max! cmq AND
 				n |= l.v << (rembits);
 				V2=V2->next;
 				} while(V2);
@@ -8524,10 +9903,22 @@ NUM_TYPE FNInitAggr(struct TAGS *V,bool mode) {		// inizializza Record
 			break;
 		case ',':
 			break;
-		case 0:
 		default:
+			dupSize=atoi(MyBuf);
+			FNLO(MyBuf);
+			FNLO(MyBuf);
+			if(!stricmp(MyBuf,"DUP")) {
+											PROCWarn(1007,"DUP su RECORD/STRUCT non completo");
+				PROCCheck('(');
+				goto rifo;
+				}
+		case 0:
 			PROCError(2054,"<");
 			break;
+		}
+
+	if(dupSize) {
+		PROCCheck(')');
 		}
 
 	return n;
@@ -8548,8 +9939,8 @@ struct TAGS *subAllocTag(const char *TS) {
     LTag=StrTag=C;
     }
   C->next=(struct TAGS *)NULL;
-  strncpy(C->label,TS,MAX_NAME_LEN);
-  C->label[MAX_NAME_LEN]=0;
+  strncpy(C->name,TS,MAX_NAME_LEN);
+  C->name[MAX_NAME_LEN]=0;
   return C;
   }
 
@@ -8581,7 +9972,7 @@ int FNCercaSeg(const char *n) {
   int i;
 
   for(i=0; i<Segs; i++) {
-    if(!stricmp(n,Seg[i].label)) { 
+    if(!stricmp(n,Seg[i].name)) { 
       return i+1;
       }
     }
@@ -8596,13 +9987,15 @@ int PROCDclSeg(const char *nome,enum SEGMENT_TYPES t) {
 	  v=Segs++; 
 		if(Segs == MAX_SEGS)
 		  PROCError(5000,nome);
-		strncpy(Seg[v].label,nome,MAX_NAME_LEN);
+		strncpy(Seg[v].name,nome,MAX_NAME_LEN);
 		Seg[v].type=t;
 		Seg[v].align=1;
 		Seg[v].unused=0;
 		Seg[v].BaseAddr=0xffffffff;
+		Seg[v].CurAddr=Seg[v].MaxAddr=0;
+		Seg[v].len=0;
 	  if(FMap)
-			fprintf(FMap,"+\t%-38s\t%04X\t%02u\t(%s:%u)\n",Seg[v].label,
+			fprintf(FMap,"+\t%-38s\t%04X\t%02u\t(%s:%u)\n",Seg[v].name,
 				Seg[v].type,Seg[v].align,__file__,__line__);
 		return v+1;
 		}
@@ -8621,7 +10014,7 @@ struct VARS *PutOnTree(struct VARS *root,struct VARS *r,struct VARS *n) {
 		n->left=0;
 		n->right=0;
 		if(root) {
-			if(strcmp(n->label,root->label)<0)
+			if(strcmp(n->name,root->name)<0)
 				root->left=n;
 			else
 			  root->right=n;
@@ -8629,7 +10022,7 @@ struct VARS *PutOnTree(struct VARS *root,struct VARS *r,struct VARS *n) {
 		n->next=NULL;
 		return n;
 		}
-	i=strcmp(n->label,r->label);
+	i=strcmp(n->name,r->name);
 	if(i<0) {
 	  PutOnTree(r,r->left,n);  // a sinistra <
 	  }
@@ -8670,7 +10063,7 @@ struct TAGS *PutOnTree2(struct TAGS *root,struct TAGS *r,struct TAGS *n) {
 		n->left=0;
 		n->right=0;
 		if(root) {
-			if(strcmp(n->label,root->label)<0)
+			if(strcmp(n->name,root->name)<0)
 				root->left=n;
 			else
 			  root->right=n;
@@ -8678,7 +10071,7 @@ struct TAGS *PutOnTree2(struct TAGS *root,struct TAGS *r,struct TAGS *n) {
 		n->next=NULL;
 		return n;
 		}
-	i=strcmp(n->label,r->label);
+	i=strcmp(n->name,r->name);
 	if(i<0) {
 	  PutOnTree2(r,r->left,n);  // a sinistra <
 	  }
@@ -8729,7 +10122,7 @@ uint8_t asc2hex(uint16_t t) {
 	return j;
 	}
 
-uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize) {
+uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize,uint32_t *saddress) {
 	uint8_t *theMemory;
 	char myBuf[256],*p;
 	uint8_t *b;
@@ -8751,7 +10144,8 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize) {
 
 	for(;;) {			// da SkyPic...
 		myBuf[0]=0;
-		fgets(myBuf,255,f);
+		if(!fgets(myBuf,255,f))
+			break;
 		p=myBuf;
 		if(*p != ':')							// START record
 			goto errore;
@@ -8780,10 +10174,12 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize) {
 			case 2:			// segmented Intel
 				j=asc2hex(*(uint16_t *)p);
 				extOfs=((uint32_t)j) << 12;
+//				extOfs=((uint32_t)j) << 16;
 				cks+=j;
 				p+=2;
 				j=asc2hex(*(uint16_t *)p);
 				extOfs |= ((uint32_t)j) << 4;
+//				extOfs |= ((uint32_t)j) << 8;
 				cks+=j;
 				p+=2;
 				break;
@@ -8813,9 +10209,19 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize) {
 						}
 					}
 				else {			
-//						S.Format("Valori offset %X:%X non gestiti!",extOfs,ofs);
-//								if(AfxMessageBox(S,MB_YESNO) == IDNO) 
-//									goto errore;
+					PROCWarn(1007,"EXTOFS in HEX!");
+					b=((uint8_t *)theMemory)+ofs+extOfs;
+					for(i=0; i<len; i++) {
+						j=asc2hex(*(uint16_t *)p);
+						minAddr=min(minAddr,(uint8_t *)b-(uint8_t *)theMemory);
+						maxAddr=max(maxAddr,(uint8_t *)b-(uint8_t *)theMemory);
+						if(*b != 0xff)		// ma non esce... sistemare! credo sia l'HEX che esce già così, in sequenza brutale...
+							PROCWarn(2104);
+						*b++=j;
+						cks+=j;
+						checksum+=j;
+						p+=2;
+						}
 					}
 				break;
 			case 0x03:
@@ -8843,10 +10249,32 @@ errore:
 fine:
 //		m_Stato.Format("File HEX caricato correttamente (%04X-%04X).",minAddr,maxAddr);
 	*bsize=maxAddr-minAddr +1;
+	*saddress=extOfs ? extOfs : minAddr;
 	return theMemory;
-
 	}
 
+
+void bumpIfs(int8_t direction,uint8_t state,uint8_t level) {
+	uint8_t i;
+
+	if(direction>0) {
+		IfDefs++;
+		if(IfDefs>MAX_DEFS)
+			PROCError(1017);
+		}
+	else if(direction<0) {
+		if(!IfDefs)
+			PROCError(1020);
+		IfDefs--;
+		}
+	else {
+		if(!IfDefs)
+			PROCError(1020);
+		}
+
+  for(i=IfDefs; i<MAX_DEFS; i++)
+		UNDEFD[i]=state;
+	}
 
 const char *stristr(const char *s1,const char *s2) {
 	int n=strlen(s2);
@@ -8859,13 +10287,75 @@ const char *stristr(const char *s1,const char *s2) {
 	return NULL;
 	}
 
-char* replace_char(char* str, char find, char replace) {
+char *strmove(char *tgt,const char *src) {
+	int i=strlen(src);
+
+	memmove(tgt,src,i+1);
+	return tgt;
+	}
+
+char *replace_char(char *str, char find, char replace) {
   char *current_pos = strchr(str,find);
 
-  while (current_pos) {
+  while(current_pos) {
     *current_pos = replace;
     current_pos = strchr(current_pos+1,find);
     }
+  return str;
+	}
+
+const char *parse_parm(const char *str,char *buf,bool skipCR) {
+  unsigned char Q,Q1,Go,i;
+	char ch,ch1=0;
+
+	i=0;
+	Q=Q1=FALSE;
+	Go=FALSE;
+
+	*buf=0;
+rifo:
+  while((ch=*str) && (ch==' ' || ch=='\t'))
+		str++;
+	if(!ch)
+		return NULL;
+	if(ch=='\n' || ch=='\r') {
+		if(!skipCR)
+			return NULL;
+		else {
+//			str++;
+//			goto rifo;
+			*buf++=ch;
+		  goto fine;
+			}
+		}
+	ch1=ch;
+	for(;;) {
+		// sistemare, testare apici
+		if(!Q1)
+			if(ch=='\"')
+				Q=!Q;
+		if(!Q)
+			if(ch=='\'')
+				Q1=!Q1;
+		if(!Q && !Q1) {
+			*buf++=ch;
+			}
+		else {
+			if(ch=='\n')
+				break;
+			}
+		if(!isadsym(ch))
+			break;
+		ch=*++str;
+		if(!isadsym(ch))
+			break;
+		}
+//	str--;
+
+fine:
+	*buf=0;
+	if(!isadsym(ch1))
+		str++;
   return str;
 	}
 
@@ -8874,3 +10364,7 @@ int8_t isasym(char ch) {
 	return iscsym(ch) || (ch=='$') || (ch=='?');
 	}
 
+int8_t isadsym(char ch) {					// asym? csym() ??		e & anche?? MASM/glabios
+	
+	return isalnum(ch) || (ch=='_') || (ch=='$') || (ch=='?') || (ch=='%') || (ch=='@');
+	}
