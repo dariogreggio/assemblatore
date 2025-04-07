@@ -33,19 +33,27 @@ struct ELF_DYN Elf_Dyn;
 
 struct COFF_HEADER CoffHeader;
 struct COFF_SECTION_TABLE CoffSection;
+//struct COFF_RELOCATIONS CoffReloc;
 
-
-int16_t subInOrd1(struct VARS *V,int16_t j) {				// questa scrive le Public
+int16_t subInOrd1(struct VARS *V,int16_t j) {				// questa scrive le Public NON PIU' USATA 2024-5
   long l3;
 
 	if(!V)
 	  return j;
 	j=subInOrd1(V->left,j);
   if((V->type & (VAR_PUBLIC | VAR_PUBLIC_DEFINED /*| VAR_LABEL*/)) == (VAR_PUBLIC | VAR_PUBLIC_DEFINED /*| VAR_LABEL*/)) {
-printf("scrivo public %4x a %x...\n",V->value,ftell(FObj));
+//printf("scrivo public %4x a %x...\n",V->value,ftell(FObj));
     *((int16_t *)&l3)=V->value;            // tolgo il segm.
-    fwrite(&l3,4,1,FObj);
-    fwrite(&OldOffNome,4,1,FObj);
+    if(CreaHex) {
+		  }
+    else if(CreaElf==1) {
+			}
+    else if(CreaElf==2) {
+			}
+		else {
+			fwrite(&l3,4,1,FObj);
+			fwrite(&OldOffNome,4,1,FObj);
+			}
     V->lpos=OldOffNome;
     OldOffNome+=strlen(V->name)+1;
     j++;
@@ -54,32 +62,114 @@ printf("scrivo public %4x a %x...\n",V->value,ftell(FObj));
 	return j;
   }
 
-int subInOrd33(struct VARS *V,int j,int16_t seg) {			// questa scrive le Proc
+int subInOrd33(struct VARS *V,int j,int16_t seg) {			// questa scrive le Proc E LE PUBLIC
   uint32_t l2;
-  struct OBJ_RELOC ov;
 
 	if(!V)
     return j;
   j=subInOrd33(V->left,j,seg);
     			// le proc sono automaticamente public??? 0x300 o 0x200
-  if((V->type & VAR_PUBLIC) && (V->type & VAR_ADDRESS) && (V->segm == seg+1)) {
-    	      printf("scrivo public %4x... @%x: ",V->value,ftell(FObj));
+  if((V->type & VAR_PUBLIC) /*&& (V->type & VAR_ADDRESS)*/ && (V->segm == seg+1)) {
+//    	      printf("scrivo proc %4x... @%x: ",V->value,ftell(FObj));
 
-		l2=ftell(FObj);
-    fseek(FObj,OldOffNome,SEEK_SET);
-    fputs(V->name,FObj);
-    	      printf("%s a %x: ",V->name,OldOffNome);
-    fputc(0,FObj);
-    fseek(FObj,l2,SEEK_SET);
+    if(CreaHex) {
+		  }
+    else if(CreaElf==1) {
+/*			Elf32_Rel.r_offset=OldOffNome-ElfHeader.e_shoff;
+			Elf32_Rel.r_info;
 
-		ov.type=V->value;
-		ov.reserved=V->type & VAR_FUNZ ? 1 : 0;
-		ov.address=OldOffNome-ObjHeader.offNomi;
+//			FINIREEEEEE
+			fwrite(&Elf32_Rel,sizeof(struct ELF_REL),1,FObj);*/
+			}
+    else if(CreaElf==2) {
+			struct COFF_SYMBOL_TABLE cst;
+			struct COFF_SYMBOL_NAME *csn=(struct COFF_SYMBOL_NAME*)&cst.name;
 
+			l2=ftell(FObj);
+			memset(csn,0,sizeof(COFF_SYMBOL_NAME));
+			if(strlen(V->name) <= 8) {
+				strcpy((char*)&csn->shortName,V->name);
+				cst.numberOfAuxSymbols=0;
+				}
+			else {
+
+				strncpy((char*)&csn->shortName,V->name,8);
+				cst.numberOfAuxSymbols=0;
+
+/*				FINIRE!! creare stringa
+				fseek(FObj,LastAddress,SEEK_SET);
+				csn->offset=ftell(FObj);
+				fputs(V->name,FObj);
+		//    	      printf("%s a %x: ",V->name,OldOffNome);
+				fputc(0,FObj);
+				cst.numberOfAuxSymbols=1;
+				LastAddress=ftell(FObj);
+				*/
+				}
+			cst.sectionNumber= IMAGE_SYM_ABSOLUTE /*seg*/;
+			cst.value=V->value;
+			if(V->type & VAR_FUNZ)
+				cst.type=IMAGE_SYM_TYPE_VOID | 0x200 /*IMAGE_SYM_DTYPE_FUNCTION*/;
+			else if(V->type & VAR_STRUCT) 
+				cst.type=IMAGE_SYM_TYPE_STRUCT;
+			else if(V->type & VAR_UNION) 
+				cst.type=IMAGE_SYM_TYPE_UNION;
+			else if(V->type & VAR_FLOAT)		// double??
+				cst.type=IMAGE_SYM_TYPE_FLOAT;
+			else {
+				switch(V->size) {		// ci sono anche i vari unsigned, ma ok
+					case 1:
+						cst.type=IMAGE_SYM_TYPE_CHAR;
+						break;
+					case 2:
+						cst.type=IMAGE_SYM_TYPE_SHORT;
+						break;
+					case 4:
+						cst.type=IMAGE_SYM_TYPE_INT /*IMAGE_SYM_TYPE_LONG*/;
+						break;
+					}
+				}
+//			if(V->type & VAR_ARRAY) 
+			//	cst.type |= 0x30 IMAGE_SYM_DTYPE_ARRAY;
+
+//			fseek(FObj,OldOffNome,SEEK_SET);
+			if(V->type & VAR_FUNZ) 
+				cst.storageClass=IMAGE_SYM_CLASS_FUNCTION;
+			else if(V->type & VAR_LABEL) 
+				cst.storageClass=IMAGE_SYM_CLASS_LABEL;
+			else if(V->type & VAR_STRUCT) 
+				cst.storageClass=IMAGE_SYM_CLASS_STRUCT_TAG;
+			else if(V->type & VAR_UNION) 
+				cst.storageClass=IMAGE_SYM_CLASS_UNION_TAG;
+			else if(V->type & VAR_RECORD) 
+				cst.storageClass=IMAGE_SYM_CLASS_BIT_FIELD;
+			else
+				cst.storageClass=IMAGE_SYM_CLASS_NULL;
+
+			fseek(FObj,OldOffNome,SEEK_SET);
+
+			fwrite(&cst,sizeof(struct COFF_SYMBOL_TABLE),1,FObj);
+			V->lpos=OldOffNome;
+			OldOffNome += sizeof(struct COFF_SYMBOL_TABLE);
+			fseek(FObj,l2,SEEK_SET);		//
+			}
+		else {
+		  struct OBJ_RELOC ov;
+			l2=ftell(FObj);
+			fseek(FObj,OldOffNome,SEEK_SET);
+			fputs(V->name,FObj);
+	//    	      printf("%s a %x: ",V->name,OldOffNome);
+			fputc(0,FObj);
+			fseek(FObj,l2,SEEK_SET);
+
+			ov.type=V->value;
+			ov.reserved=V->type & VAR_FUNZ ? 1 : 0;
+			ov.address=OldOffNome-ObjHeader.offNomi;
 //			      printf(" e nome %4x... @%x\n",OldOffNome,ftell(FObj));
-    fwrite(&ov,sizeof(struct OBJ_RELOC),1,FObj);
-    V->lpos=OldOffNome;
-    OldOffNome += strlen(V->name)+1;
+			fwrite(&ov,sizeof(struct OBJ_RELOC),1,FObj);
+			V->lpos=OldOffNome;
+			OldOffNome += strlen(V->name)+1;
+			}
   	          
     j++;
     }
@@ -88,39 +178,106 @@ int subInOrd33(struct VARS *V,int j,int16_t seg) {			// questa scrive le Proc
   return j;
   }
   
-int subInOrd4(struct VARS *V,int j,int16_t seg) {			// questa scrive le Extern CHE METTO TUTTE NEL _abs (2024)
+int subInOrd4(struct VARS *V,int j,int16_t seg) {			// questa scrive le Extern CHE METTO TUTTE NEL _abs (2024) v. anche sotto
   uint32_t l2;
-  struct OBJ_RELOC ov;
   
 	if(!V)
     return j;
   j=subInOrd4(V->left,j,seg);
 //    	      printf("guardo per ch. seg, %lx...\n",V->value);
-  if(V->type & VAR_EXTERN && V->segm /*&& LOBYTE(HIWORD(V->value)) == seg+1*/) {
+  if(V->type & VAR_EXTERN && V->segm==SEG_EXTERN /*&& LOBYTE(HIWORD(V->value)) == seg+1*/) {
 //  	          l3=((Var[i].value & 0x00ff0000) >> 16) -1;            // tolgo il segm.
 
-		l2=ftell(FObj);
-    fseek(FObj,OldOffNome,SEEK_SET);
-    fputs(V->name,FObj);
-    fputc(0,FObj);
-//              puts(V->name);
-    fseek(FObj,l2,SEEK_SET);
-
 //  	fseek(FObj,addr-8+LOBYTE(HIWORD(V->value))*8,SEEK_SET);
-		ov.type=MAKEWORD(0,1);
-		ov.reserved=0;
-		ov.address=OldOffNome-ObjHeader.offNomi;
-//  	          if(!V->lpos) {
-//    	          fwrite(&OldOffNome,4,1,FObj);
-//  	            V->lpos=OldOffNome;
-//  	            OldOffNome+=_fstrlen(V->name)+1;
-//  	            }      
-//  	          else {
-//								V->lpos+=myPos;
-    V->lpos=OldOffNome;
-    fwrite(&ov,sizeof(struct OBJ_RELOC),1,FObj);
+    if(CreaHex) {
+		  }
+    else if(CreaElf==1) {
+/*			ElfHeader.e_shoff=LastAddress;
+*/
+			}
+    else if(CreaElf==2) {
+			struct COFF_SYMBOL_TABLE cst;
+			struct COFF_SYMBOL_NAME *csn=(struct COFF_SYMBOL_NAME*)&cst.name;
+			l2=ftell(FObj);
+			memset(csn,0,sizeof(COFF_SYMBOL_NAME));
+			if(strlen(V->name) <= 8) {
+				strcpy((char*)&csn->shortName,V->name);
+				cst.numberOfAuxSymbols=0;
+				}
+			else {
+				strncpy((char*)&csn->shortName,V->name,8);
+				cst.numberOfAuxSymbols=0;
 
-    OldOffNome+=strlen(V->name)+1;
+/*				FINIRE!! creare stringa
+				fseek(FObj,LastAddress,SEEK_SET);
+				csn->offset=ftell(FObj);
+				fputs(V->name,FObj);
+		//    	      printf("%s a %x: ",V->name,OldOffNome);
+				fputc(0,FObj);
+				cst.numberOfAuxSymbols=1;
+				LastAddress=ftell(FObj);
+				*/
+				}
+			cst.sectionNumber=IMAGE_SYM_ABSOLUTE /*seg*/;
+			cst.value=V->value;
+			if(V->type & VAR_FUNZ)
+				cst.type=IMAGE_SYM_TYPE_VOID | 0x200 /*IMAGE_SYM_DTYPE_FUNCTION*/;
+			else if(V->type & VAR_STRUCT) 
+				cst.type=IMAGE_SYM_TYPE_STRUCT;
+			else if(V->type & VAR_UNION) 
+				cst.type=IMAGE_SYM_TYPE_UNION;
+			else if(V->type & VAR_FLOAT)		// double??
+				cst.type=IMAGE_SYM_TYPE_FLOAT;
+			else {
+				switch(V->size) {		// ci sono anche i vari unsigned, ma ok
+					case 1:
+						cst.type=IMAGE_SYM_TYPE_CHAR;
+						break;
+					case 2:
+						cst.type=IMAGE_SYM_TYPE_SHORT;
+						break;
+					case 4:
+						cst.type=IMAGE_SYM_TYPE_INT /*IMAGE_SYM_TYPE_LONG*/;
+						break;
+					}
+				}
+//			if(V->type & VAR_ARRAY) 
+			//	cst.type |= 0x30 IMAGE_SYM_DTYPE_ARRAY;
+
+//			fseek(FObj,OldOffNome,SEEK_SET);
+
+			cst.storageClass=IMAGE_SYM_CLASS_EXTERNAL_DEF;
+
+			fseek(FObj,OldOffNome,SEEK_SET);
+
+			fwrite(&cst,sizeof(struct COFF_SYMBOL_TABLE),1,FObj);
+			V->lpos=OldOffNome;
+			OldOffNome += sizeof(struct COFF_SYMBOL_TABLE);
+			fseek(FObj,l2,SEEK_SET);		//
+			}
+		else {
+		  struct OBJ_RELOC ov;
+			l2=ftell(FObj);
+			fseek(FObj,OldOffNome,SEEK_SET);
+			fputs(V->name,FObj);
+			fputc(0,FObj);
+	//              puts(V->name);
+			fseek(FObj,l2,SEEK_SET);
+
+			ov.type=MAKEWORD(0,1);
+			ov.reserved=0;
+			ov.address=OldOffNome-ObjHeader.offNomi;
+	//  	          if(!V->lpos) {
+	//    	          fwrite(&OldOffNome,4,1,FObj);
+	//  	            V->lpos=OldOffNome;
+	//  	            OldOffNome+=_fstrlen(V->name)+1;
+	//  	            }      
+	//  	          else {
+	//								V->lpos+=myPos;
+			fwrite(&ov,sizeof(struct OBJ_RELOC),1,FObj);
+			V->lpos=OldOffNome;
+		  OldOffNome+=strlen(V->name)+1;
+			}
 //  	            }
   	j++;
 //    *(((char *)&V->value)+2)=0;  // usare HIBYTE(HIWORD
@@ -153,7 +310,6 @@ void subInOrd5(struct VARS *V) {
   }
 #endif
   
-	uint32_t myPtr,charPtr;
 int subOut(int32_t t,int32_t t1) {
   char myBuf[128];
 	uint8_t lineLen;
@@ -161,7 +317,7 @@ int subOut(int32_t t,int32_t t1) {
   int i,j;
   struct VARS *V;
 	static uint8_t myChksum;			/* lungh del primo record */;   // usati per hex
-//	static uint32_t myPtr,charPtr;
+	static uint32_t myPtr,charPtr;
 	static long myInizriga=0;      // usati per hex
 	static uint8_t outCnt;
 	static uint8_t oldT,oldT2,oldT3;
@@ -348,18 +504,22 @@ int subOut(int32_t t,int32_t t1) {
 							fputc(0,FObj);
 							Seg[i].lposName=LastAddress;
 							LastAddress = ftell(FObj);
-							ObjHeader.lunNomi += strlen(Seg[i].name)+1;
+// forse qua non c'è, idem la cosa dopo							ElfHeader.lunNomi += strlen(Seg[i].name)+1;
 //							}
 						i++;
 						}
 					fputs(".symtab",FObj);
 					fputc(0,FObj);
 					LastAddress = ftell(FObj);
-					ObjHeader.lunNomi += 7+1;
+					ElfHeader.e_shoff += 7+1;
 					fputs(".strtab",FObj);
 					fputc(0,FObj);
 					LastAddress = ftell(FObj);
-					ObjHeader.lunNomi += 7+1;
+					ElfHeader.e_shoff += 7+1;
+
+					fseek(FObj,0,SEEK_SET);
+// SE METTO QUESTO SI INCASINANO I SIMBOLI! 
+		// VERIFICARE 5/4/25    fwrite(&ElfHeader,sizeof(struct ELF_HEADER),1,FObj);
 
 	        }
 	      else if(CreaElf==2) {
@@ -369,25 +529,27 @@ int subOut(int32_t t,int32_t t1) {
 //						if(Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) 
 							j++;
 						}
-					CoffHeader.numberOfSections=j;
-					CoffHeader.numberOfSymbols=1  +j   +2 /*symbol e stringhe*/;
+					CoffHeader.numberOfSections=j+2;	/*symbol e stringhe*/
+					CoffHeader.numberOfSymbols=0; ///*1  +*/ j   +2 /*symbol e stringhe*/;
 // verificare, non è come in Elf...
 // FORSE non contare i SEGMENT_VIRT
 
-					CoffHeader.pointerToSymbolTable=0;
+					CoffHeader.pointerToSymbolTable=LastAddress;
 					CoffHeader.sizeOfOptionalHeader=0;
 					CoffHeader.timeDateStamp=time(&tt);
-					CoffHeader.characteristics=0;
+					CoffHeader.characteristics=IMAGE_FILE_LINE_NUMS_STRIPPED | IMAGE_FILE_DEBUG_STRIPPED |
+						(CPULevel<3 ? IMAGE_FILE_16BIT_MACHINE /*dice reserved ma fottiti!*/ : IMAGE_FILE_32BIT_MACHINE) |
+						IMAGE_FILE_BYTES_REVERSED_LO /*direi*/  ; 
 		      fseek(FObj,0,SEEK_SET);
 					fwrite(&CoffHeader,sizeof(struct COFF_HEADER),1,FObj);
 
-					j=LastAddress+CoffHeader.numberOfSections*sizeof(COFF_SECTION_TABLE);
-		      fseek(FObj,LastAddress,SEEK_SET);
+//					j=LastAddress+CoffHeader.numberOfSections*sizeof(COFF_SECTION_TABLE);
+//		      fseek(FObj,LastAddress,SEEK_SET);
 
-					memset(&CoffSection,0,sizeof(COFF_SECTION_TABLE));		// sezione NULLA obbligatoria!
-					fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
-					LastAddress+=sizeof(struct COFF_SECTION_TABLE );
-					for(i=0; i<CoffHeader.numberOfSymbols-1-2; i++) {
+//					memset(&CoffSection,0,sizeof(COFF_SECTION_TABLE));		// sezione NULLA obbligatoria! bah non è vero
+//					fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
+//					LastAddress+=sizeof(struct COFF_SECTION_TABLE);
+					for(i=0; i<CoffHeader.numberOfSections-2; i++) {
 //						if(Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
 							strncpy((char*)&CoffSection.name,Seg[i].name,8);
 	// no						CoffSection.name[7]=0;
@@ -399,13 +561,13 @@ int subOut(int32_t t,int32_t t1) {
 									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE;
 									break;
 								case SEGMENT_DATA & 0xff00:
-									CoffSection.characteristics |= IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_INITIALIZED_DATA;
+									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_INITIALIZED_DATA;
 									break;
 								case SEGMENT_BSS & 0xff00:
-									CoffSection.characteristics |= IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_UNINITIALIZED_DATA;
+									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_CNT_UNINITIALIZED_DATA;
 									break;
 								case SEGMENT_CONST & 0xff00:
-									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_UNINITIALIZED_DATA;
+									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
 									break;
 								case SEGMENT_ABS & 0xff00:
 									CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_SHARED /**boh*/;
@@ -428,55 +590,89 @@ int subOut(int32_t t,int32_t t1) {
 	#elif GD24032
 	#endif
 								}
+
 							CoffSection.virtualAddress=Seg[i].BaseAddr != 0xffffffff ? Seg[i].BaseAddr : 0;
 
-							CoffSection.sizeOfRawData=Seg[i].len;
-	// IDEM sistemare
+							CoffSection.pointerToRawData=Seg[i].lpos;
+							if((Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
+								CoffSection.sizeOfRawData=Seg[i].len;
+							else
+								CoffSection.sizeOfRawData=0;
+							if(CoffSection.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA)		// così dice
+								CoffSection.virtualSize=0;
+							else
+								CoffSection.virtualSize=CoffSection.sizeOfRawData;
 
-							CoffSection.characteristics |= 
-								Seg[i].len==1 ? IMAGE_SCN_ALIGN_1BYTES : (Seg[i].len==2 ? IMAGE_SCN_ALIGN_2BYTES :
-							(Seg[i].len==4 ? IMAGE_SCN_ALIGN_4BYTES : 0));
+							CoffSection.pointerToRelocations=Seg[i].lposReloc;
+							CoffSection.pointerToLinenumbers=0;
+							CoffSection.numberOfRelocations=Seg[i].numReloc;
+							CoffSection.numberOfLinenumbers=0;
+
+							CoffSection.characteristics |= IMAGE_SCN_ALIGN_1BYTES;
+/*								Seg[i].len==1 ? IMAGE_SCN_ALIGN_1BYTES : (Seg[i].len==2 ? IMAGE_SCN_ALIGN_2BYTES :
+							(Seg[i].len==4 ? IMAGE_SCN_ALIGN_4BYTES : 0));*/
 							fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
-							LastAddress+=sizeof(struct COFF_SECTION_TABLE);
+							//LastAddress+=sizeof(struct COFF_SECTION_TABLE);
 	//						}
 						}
 
-
-					strncpy((char*)&CoffSection.name,"SYMBOLS",8);		// boh
+					{
+					uint32_t myPosS=ftell(FObj),myLen=0;
+					strncpy((char*)&CoffSection.name,"SYMBOLS",8);		// non so se sia necessario avere una Sezione apposta, ma l'idea mi piace cmq! (come in Elf)
 // no						CoffSection.name[7]=0;
-					CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_SHARED /**boh*/;
+					CoffSection.characteristics = IMAGE_SCN_ALIGN_1BYTES | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_SHARED /**boh*/;
 					CoffSection.virtualAddress=0;
-					CoffSection.pointerToRawData=ftell(FObj)+sizeof(struct COFF_SECTION_TABLE);
-					i=0;
-					CoffSection.sizeOfRawData=Segs+1+2;
-					CoffSection.characteristics |= IMAGE_SCN_ALIGN_1BYTES;		//
+					CoffSection.pointerToRawData=LastAddress/*ftell(FObj)*/;
+					CoffSection.sizeOfRawData=0;
+					CoffSection.pointerToRelocations=0;
+					CoffSection.pointerToLinenumbers=0;
+					CoffSection.numberOfRelocations=0;
+					CoffSection.numberOfLinenumbers=0;
 					fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
-					LastAddress+=sizeof(struct COFF_SECTION_TABLE);
+					//LastAddress+=sizeof(struct COFF_SECTION_TABLE);
 
-	/*mettere!						fseek(FObj,Seg[i].lposPub,SEEK_SET);
+					j=0;
+					for(i=0; i<Segs; i++) {
+						uint32_t myPos;
+//						if(Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
+							myPos=ftell(FObj);
+							fseek(FObj,Seg[i].lposPub,SEEK_SET);
 							OldOffNome=LastAddress;
-							j=subInOrd33(Var,0,i);
+							j+=subInOrd33(Var,0,i);
+//							j=subInOrd1(Var,0);
 							fseek(FObj,Seg[i].lposExt,SEEK_SET);
-							subInOrd4(Var,0,i);
-							LastAddress=OldOffNome;*/
+							if((Seg[i].type & 0xff00) == (SEGMENT_ABS & 0xff00))		// v. anche sopra
+								j+=subInOrd4(Var,0,i);
+							myLen+=OldOffNome-LastAddress;
+							LastAddress=OldOffNome;
+							fseek(FObj,myPos,SEEK_SET);
+						}
+					fseek(FObj,myPosS,SEEK_SET);
+					CoffSection.sizeOfRawData=myLen;
+					fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
+					CoffHeader.numberOfSymbols=j;
+					}
 
 
 					strncpy((char*)&CoffSection.name,"STRINGS",8);		// boh
-// NOME qua??
-					CoffSection.characteristics |= IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
+// NOME qua?? in effetti non sembra che i nomi segmenti debbano andare qua... ci son già sopra... quindi??
+					CoffSection.characteristics = IMAGE_SCN_ALIGN_1BYTES | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_SHARED /**boh*/;
 					CoffSection.virtualAddress=0;
-					CoffSection.pointerToRawData=ftell(FObj)+sizeof(struct COFF_SECTION_TABLE);
+					CoffSection.pointerToRawData=LastAddress/*ftell(FObj)*/;
 					i=0;
-					j=1;
+					j=4 + sizeof(COPYRIGHT_STRING);
 					while(/*i<NumSegs-1*/ *Seg[i].name)
 						j+=strlen(Seg[i++].name)+1;
 					CoffSection.sizeOfRawData=j;
-					CoffSection.characteristics |= IMAGE_SCN_ALIGN_1BYTES;		//
+					CoffSection.pointerToRelocations=0;
+					CoffSection.pointerToLinenumbers=0;
+					CoffSection.numberOfRelocations=0;
+					CoffSection.numberOfLinenumbers=0;
 					fwrite(&CoffSection,sizeof(struct COFF_SECTION_TABLE),1,FObj);
-					LastAddress+=sizeof(struct COFF_SECTION_TABLE);
+					//LastAddress+=sizeof(struct COFF_SECTION_TABLE);
 
- 					fseek(FObj,LastAddress,SEEK_SET);         //  ora le stringhe
-					fputc(0,FObj);					// 1° stringa vuota sempre!
+ 					fseek(FObj,LastAddress,SEEK_SET);         //  quindi togliere nomi segmenti
+					fputc(0,FObj);fputc(0,FObj);fputc(0,FObj);fputc(0,FObj);					// 1° stringa vuota sempre! 4 byte
 					i=0;
 					while(/*i<NumSegs-1*/ *Seg[i].name) {
 //						if(Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
@@ -484,10 +680,16 @@ int subOut(int32_t t,int32_t t1) {
 							fputc(0,FObj);
 							Seg[i].lposName=LastAddress;
 							LastAddress = ftell(FObj);
-							ObjHeader.lunNomi += strlen(Seg[i].name)+1;
+//							CoffHeader.pointerToSymbolTable += strlen(Seg[i].name)+1;
 //							}
 						i++;
 						}
+					fputs(COPYRIGHT_STRING,FObj);
+					fputc(0,FObj);
+					LastAddress = ftell(FObj);
+
+					fseek(FObj,0,SEEK_SET);
+					fwrite(&CoffHeader,sizeof(struct COFF_HEADER),1,FObj);
 
 	        }
 	      else {
@@ -521,15 +723,18 @@ int subOut(int32_t t,int32_t t1) {
 					fseek(FObj,0,SEEK_SET);
 					fwrite(&ObjHeader,sizeof(OBJ_HEADER),1,FObj);
 
+					j=0;
 					for(i=0; i<Segs; i++) {
 						uint32_t myPos;
 //						if(Seg[i].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
 							myPos=ftell(FObj);
 							fseek(FObj,Seg[i].lposPub,SEEK_SET);
 							OldOffNome=LastAddress;
-							j=subInOrd33(Var,0,i);
+							j+=subInOrd33(Var,0,i);
+//							j=subInOrd1(Var,0);
 							fseek(FObj,Seg[i].lposExt,SEEK_SET);
-							subInOrd4(Var,0,i);
+							if((Seg[i].type & 0xff00) == (SEGMENT_ABS & 0xff00))		// v. anche sopra
+								j+=subInOrd4(Var,0,i);
 							LastAddress=OldOffNome;
 							fseek(FObj,myPos,SEEK_SET);
 
@@ -549,6 +754,7 @@ int subOut(int32_t t,int32_t t1) {
 
 					}
 	      break;
+
 	    case OUT_VAR_EXT:                      // scrive var extern e public
 	      if(CreaHex) {
 	        }
@@ -557,6 +763,7 @@ int subOut(int32_t t,int32_t t1) {
 	      else {
 	        }
 	      break;
+
 	    case OUT_SEGM:                      // cambio di segmento
 	      if(CreaHex) {
 // di là	        PROCWarn(1006,"CSEG/DSEG");
@@ -578,7 +785,7 @@ int subOut(int32_t t,int32_t t1) {
 #endif
 		 	    myInizriga=ftell(FObj);
 	  	    myChksum=0;
-					myPtr=Seg[CurSeg-1].CurAddr /*passarlo come t1...*/;
+					myPtr=Seg[CurSeg-1].CurAddr /*prenderlo come t1...*/;
 					charPtr=0;
 	        }
 	      else if(CreaElf) {
@@ -591,7 +798,7 @@ int subOut(int32_t t,int32_t t1) {
 // seg.name & var string-table
 
 					if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
-						fseek(FObj,	Seg[CurSeg-1].lpos+Seg[CurSeg-1].CurAddr-Seg[CurSeg-1].BaseAddr,SEEK_SET);
+						fseek(FObj,	Seg[CurSeg-1].lpos+Seg[CurSeg-1].CurAddr/*t1*/ -Seg[CurSeg-1].BaseAddr,SEEK_SET);
 //			      printf("Segmento: %x(%s), code %x, lpos %x, len %x, reloc %x, offName %x\n",
 //							CurSeg,Seg[CurSeg-1].name,Seg[CurSeg-1].lpos,Seg[CurSeg-1].lpos,Seg[CurSeg-1].len,Seg[CurSeg-1].lposReloc,OldOffNome);
 	        }
@@ -607,13 +814,14 @@ int subOut(int32_t t,int32_t t1) {
 						if(Seg[CurSeg-1].BaseAddr == 0xffffffff)
 							fseek(FObj,	Seg[CurSeg-1].lpos,SEEK_SET);
 						else
-							fseek(FObj,	Seg[CurSeg-1].lpos+Seg[CurSeg-1].CurAddr-Seg[CurSeg-1].BaseAddr,SEEK_SET);
+							fseek(FObj,	Seg[CurSeg-1].lpos+Seg[CurSeg-1].CurAddr/*t1*/ -Seg[CurSeg-1].BaseAddr,SEEK_SET);
 						}
 //			      printf("Segmento: %x(%s), code %x, lpos %x, len %x, reloc %x, offName %x\n",
 //							CurSeg,Seg[CurSeg-1].name,Seg[CurSeg-1].lpos,Seg[CurSeg-1].lpos,Seg[CurSeg-1].len,Seg[CurSeg-1].lposReloc,OldOffNome);
 //						NumSegs++;
  					}
 	      break;
+
 	    case OUT_RELOC:                      // scrive reloc addr per seg
 	      if(CreaHex) {
 // mah 2024	       					PROCWarn(1006,"");
@@ -621,35 +829,42 @@ int subOut(int32_t t,int32_t t1) {
 	      else if(CreaElf==1) {
 					struct ELF_REL or;
 					l2=ftell(FObj);
+					fseek(FObj,Seg[CurSeg-1].lposReloc+Seg[CurSeg-1].numReloc*sizeof(struct ELF_REL),SEEK_SET);
 //					ElfHeader.e_phoff=RelocAddr;   Seg[CurSeg-1].CurAddr-2
 									  Seg[CurSeg-1].numReloc++;
 
+					fwrite(&or,sizeof(struct ELF_REL),1,FObj);
 					fseek(FObj,l2,SEEK_SET);
 					//FINIRE
 	        }
 	      else if(CreaElf==2) {
 					struct COFF_RELOCATIONS or;
 					l2=ftell(FObj);
+					fseek(FObj,Seg[CurSeg-1].lposReloc+Seg[CurSeg-1].numReloc*sizeof(struct COFF_RELOCATIONS),SEEK_SET);
 					or.virtualAddress=Seg[CurSeg-1].CurAddr-2;
+
 					or.symbolTableIndex=Seg[CurSeg-1].numReloc;
-					if(t1 < 0) {                // extrn
-						or.type=MAKEWORD(LOBYTE(t1) -1,1);
-						}
-					else {                      // norm
-						or.type=t1/*CurSeg*/-1;
-						}
-					or.type=0;
-									  Seg[CurSeg-1].numReloc++;
+//??					if(t1 < 0 /*SEG_UNDEFINED*/) {                // extrn 
+
+					if((Seg[CurSeg-1].type & 0xff00 == (SEGMENT_ABS & 0xff00)) || 
+						(Seg[CurSeg-1].type & 0xff00 == (SEGMENT_VIRT & 0xff00)))
+						or.type=IMAGE_REL_I386_ABSOLUTE;
+					else
+						or.type=IMAGE_REL_I386_ABSOLUTE;		
+//						or.type=IMAGE_REL_I386_DIR16 /*IMAGE_REL_I386_ABSOLUTE*/;		
+					// IMAGE_REL_I386_DIR16 no supportato dice ma lo prende... opp.vuole IMAGE_REL_I386_DIR32
+// se metto !=ABSOLUTE, VUOLE un Symbol associato... boh					or.symbolTableIndex=0;
+					// per ora evito!
 
 					fwrite(&or,sizeof(struct COFF_RELOCATIONS),1,FObj);
+					Seg[CurSeg-1].numReloc++;
 					fseek(FObj,l2,SEEK_SET);
-					//FINIRE
 	        }
 	      else {
 					struct OBJ_RELOC or;
 					l2=ftell(FObj);
 					fseek(FObj,Seg[CurSeg-1].lposReloc+Seg[CurSeg-1].numReloc*sizeof(struct OBJ_RELOC),SEEK_SET);
-					if(t1 < 0) {                // extrn
+					if(t1 < 0/*SEG_UNDEFINED*/) {                // extrn
 						or.type=MAKEWORD(LOBYTE(t1) -1,1);
 						}
 					else {                      // norm
@@ -664,6 +879,7 @@ int subOut(int32_t t,int32_t t1) {
 	//	      printf("Ora relocaddr vale %lx\n",RelocAddr);
 					}
 	      break;
+
 	    case OUT_REPOS:                      // sposta puntatore (ORG/CSEG
 	      if(CreaHex) {
 					if(t1 && t1 < myPtr /*ftell(FObj)*/)
@@ -689,6 +905,7 @@ int subOut(int32_t t,int32_t t1) {
 		        fseek(FObj,t1,SEEK_CUR);
 					}
 	      break;
+
 	    case OUT_START:                      // start         
 	      if(CreaHex) {
 					struct VARS *v=FNCercaVar("_main",0,0,TRUE,CPass);				// indirizzo di "main" se c'è o direi ORG più basso! o 0
@@ -704,7 +921,7 @@ int subOut(int32_t t,int32_t t1) {
 						);
 #else
 			    fprintf(FObj,":02000003%02X%02X%02X\n",LOBYTE(LOWORD(l)),HIBYTE(LOWORD(l)),
-						(uint8_t)-(2+3+LOBYTE(LOWORD(l))+HIBYTE(LOWORD(l)));
+						(uint8_t)-(2+3+LOBYTE(LOWORD(l))+HIBYTE(LOWORD(l))));
 #endif
 		 	    myInizriga=ftell(FObj);
 	  	    myChksum=0;
@@ -877,7 +1094,8 @@ int subOut(int32_t t,int32_t t1) {
 					ElfSectionHeader.sh_name=194 ;		// //C30 signature...
 					fwrite(&ElfSectionHeader,sizeof(struct ELF_SECTION_HEADER),1,FObj);
 */
-					fwrite(&Elf_Phdr,sizeof(struct ELF_PROGRAM_HEADER),Segs,FObj);
+//					fwrite(&Elf_Phdr,sizeof(struct ELF_PROGRAM_HEADER),Segs,FObj);
+					fwrite(&CoffSection,sizeof(COFF_SECTION_TABLE),Segs,FObj);
 					}
 	      else {
 #if PIC==18
@@ -908,6 +1126,7 @@ int subOut(int32_t t,int32_t t1) {
 					fwrite(&ObjSeg,sizeof(OBJ_SEG_DEF),Segs,FObj);
 					}
 	      break;
+
 	    default:
 				t &= 0xff;
 	      if(CreaHex) {
@@ -1007,7 +1226,7 @@ int subOut(int32_t t,int32_t t1) {
 	    case OUT_REPOS:                      // sposta puntatore (ORG/CSEG
 	      break;
 	    case OUT_RELOC:                      // (scrive addr per seg)
-			  Seg[CurSeg-1].numReloc++;
+			  Seg[CurSeg-1  /*t1?? 2025*/].numReloc++;
         break;
 	    case OUT_START:                      // start         
         break;

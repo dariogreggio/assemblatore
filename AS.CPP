@@ -40,9 +40,10 @@
 // sostituire stringhe dentro stringhe ecc... 
 // macro ricorsive...
 // (METTERE in LST le righe con solo commento?? MASM lo fa
+// le RELOCations sono a posto come file obj/o ecc , ma verificare cosa esce in 8086
 
 // pare ok per hex/bin ora (se org non sono in sequenza fa casino di nuovo...
-// RINUMERARE registri 16bit 8086 partendo da 0, v.
+// (RINUMERARE registri 16bit 8086 partendo da 0, v. .. complicato e inutile
 // F6 D0				NOT	AL	 è ciucco, esce F6 00			ok ora
 // MOV	BYTE PTR EQUIP_FLAGS, AL  address esce a 8bit anziché 16
 // D2 C8		     ROR	AL, CL   invece esce D0 C8		ok ora
@@ -248,25 +249,7 @@ int PROCInit() {
     PROCDclVar("I8086",v,VAR_NUMBER,0);
 #endif
     }
-#if ARCHI
-  fprintf(stderr,"\nThe G.Dar Assembler for the Archimedes on PC, (C) 1994 - Version %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif Z80
-  fprintf(stderr,"\nAssemblatore di G.Dar per lo Z80 su PC, (C) 1994-2024 - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif _6502
-  fprintf(stderr,"\nAssemblatore di G.Dar per il 6502 su PC, (C) 1994-2024 - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif I8051
-  fprintf(stderr,"\nAssemblatore per lo 8051 su PC - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif ST62
-  fprintf(stderr,"\nAssemblatore per ST62XX su PC - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif PIC==16
-  fprintf(stderr,"\nAssemblatore per PIC16 su PC - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif PIC==18
-  fprintf(stderr,"\nAssemblatore per PIC18 su PC - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif GD24032
-  fprintf(stderr,"\nAssemblatore per GD24032 su PC - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#elif I8086
-  fprintf(stderr,"\nAssemblatore di G.Dar per l'80x86 - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
-#endif
+  fprintf(stderr,"\n"COPYRIGHT_STRING" - Versione %d.%02d\n",__VER__ / 256,__VER__ & 255);
   fprintf(stderr,"(C) Dario's Automation 2024-2025; ADPM Synthesis 1994-2000\n");
 
   return 0;                        
@@ -611,50 +594,49 @@ print_init:
 					j=i;
 			    if(CreaElf==1) {
 						// qua bisognerebbe vedere come fare con _abs/extern
-						Seg[j].lpos=sizeof(ELF_HEADER)+sizeof(ELF_PROGRAM_HEADER)*(Segs);
+						Seg[j].lpos=sizeof(ELF_HEADER)+sizeof(ELF_PROGRAM_HEADER)*(Segs+2 /*symbols e strings*/);
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
-							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							Seg[j].lposReloc= Seg[j].lpos;
 							}
 						else {
 							if(Seg[j].BaseAddr == 0xffffffff)
-								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+								Seg[j].lposReloc= Seg[j].lpos;
 							else
-								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].len;
 							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct ELF_REL);
 						// sbagliato, sistemare, trovare
-						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct ELF_REL);
+						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct ELF_SYMBOL_TABLE_ENTRY);
 						Seg[j].numReloc=0;
-						LastAddress=max(LastAddress,Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL));
+						LastAddress=max(LastAddress,Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_SYMBOL_TABLE_ENTRY));
 						}
 			    else if(CreaElf==2) {
 						// qua bisognerebbe vedere come fare con _abs/extern
-						Seg[j].lpos=sizeof(COFF_HEADER)+sizeof(COFF_SECTION_TABLE)*(Segs);
+						Seg[j].lpos=sizeof(COFF_HEADER)+sizeof(COFF_SECTION_TABLE)*(Segs+2 /*symbols e strings*/);
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
-							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							Seg[j].lposReloc= Seg[j].lpos;
 							}
 						else {
 							if(Seg[j].BaseAddr == 0xffffffff)
-								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+								Seg[j].lposReloc= Seg[j].lpos;
 							else
-								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].len;
 							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct COFF_RELOCATIONS);
-						// ovv sbagliato, sistemare, trovare
-						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct COFF_RELOCATIONS);
+						Seg[j].lposExt=Seg[j].lposPub/*+Seg[j].numPub*sizeof(struct COFF_SYMBOL_TABLE) qua van tutte in una section a sé*/;
 						Seg[j].numReloc=0;
-						LastAddress=max(LastAddress,Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS));
+						LastAddress=max(LastAddress,Seg[j].lposExt/*+Seg[j].numExt*sizeof(struct COFF_SYMBOL_TABLE)*/);
 						}
 					else {
 						Seg[j].lpos=sizeof(OBJ_HEADER)+sizeof(OBJ_SEG_DEF)*(Segs);
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
-							Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+							Seg[j].lposReloc= Seg[j].lpos;		 //non usato qua cmq... 
 							}
 						else {
 							if(Seg[j].BaseAddr == 0xffffffff)
-								Seg[j].lposReloc= Seg[j].lpos+Seg[j].MaxAddr;
+								Seg[j].lposReloc= Seg[j].lpos;
 							else
-								Seg[j].lposReloc= Seg[j].lpos+(Seg[j].MaxAddr - Seg[j].BaseAddr);
+								Seg[j].lposReloc= Seg[j].lpos+Seg[j].len;
 							}
 						Seg[j].lposPub=Seg[j].lposReloc+Seg[j].numReloc*sizeof(struct OBJ_RELOC);
 						Seg[j].lposExt=Seg[j].lposPub+Seg[j].numPub*sizeof(struct OBJ_RELOC);
@@ -667,42 +649,41 @@ print_init:
 				else {
 			    if(CreaElf==1) {
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
-							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL);		// ovvero LastAddress..
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_SYMBOL_TABLE_ENTRY);		// ovvero LastAddress..
+							Seg[i].lposReloc=Seg[i].lpos;
 							}
 						else {
-							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_REL);
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct ELF_SYMBOL_TABLE_ENTRY);
+							Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
 							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct ELF_REL);
 						// sbagliato, sistemare, trovare
-						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct ELF_REL);
+						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct ELF_SYMBOL_TABLE_ENTRY);
 						Seg[i].numReloc=0;
-						LastAddress=max(LastAddress,Seg[i].lposExt+Seg[i].numExt*sizeof(struct ELF_REL));
+						LastAddress=max(LastAddress,Seg[i].lposExt+Seg[i].numExt*sizeof(struct ELF_SYMBOL_TABLE_ENTRY));
 						}
 			    else if(CreaElf==2) {
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
-							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS);		// ovvero LastAddress..
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_SYMBOL_TABLE);		// ovvero LastAddress..
+							Seg[i].lposReloc=Seg[i].lpos;
 							}
 						else {
-							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_RELOCATIONS);
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct COFF_SYMBOL_TABLE);
+							Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
 							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct COFF_RELOCATIONS);
-						// ovv sbagliato, sistemare, trovare
-						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct COFF_RELOCATIONS);
+						Seg[i].lposExt=Seg[i].lposPub/*+Seg[i].numPub*sizeof(struct COFF_SYMBOL_TABLE) qua van tutte in una section a sé*/;
 						Seg[i].numReloc=0;
-						LastAddress=max(LastAddress,Seg[i].lposExt+Seg[i].numExt*sizeof(struct COFF_RELOCATIONS));
+						LastAddress=max(LastAddress,Seg[i].lposExt/*+Seg[i].numExt*sizeof(struct COFF_SYMBOL_TABLE)*/);
 						}
 					else {
 						if((Seg[i].type & 0xff00) == (SEGMENT_VIRT & 0xff00)) {
 							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct OBJ_RELOC);		// ovvero LastAddress..
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr;
+							Seg[i].lposReloc=Seg[i].lpos;										 //non usato qua cmq... 
 							}
 						else {
 							Seg[i].lpos=Seg[j].lposExt+Seg[j].numExt*sizeof(struct OBJ_RELOC);
-							Seg[i].lposReloc=Seg[j].lpos+Seg[i].MaxAddr+Seg[i].len;
+							Seg[i].lposReloc=Seg[i].lpos+Seg[i].len;
 							}
 						Seg[i].lposPub=Seg[i].lposReloc+Seg[i].numReloc*sizeof(struct OBJ_RELOC);
 						Seg[i].lposExt=Seg[i].lposPub+Seg[i].numPub*sizeof(struct OBJ_RELOC);
@@ -887,7 +868,7 @@ rifo:
   }
 
 int PROCIsDecl() {       // qua si guarda se c'è label DW(...) valore ecc
-  int v,i;
+  int v,i,j;
   struct SEGMENTED_VALUE l;
   uint32_t op1,op2;
   char T[256],T1[256],MyBuf[128];
@@ -1020,6 +1001,7 @@ do_equ:
 									CurProc[CurProcLevel-1]->segm=CurSeg/*2025*/;
 #endif
 									/*else*/ if(!stricmp(MyBuf,"USES")) {
+										j=0;
 										FNLO(MyBuf);
 										do {
 											FNLO(T1);
@@ -1031,38 +1013,76 @@ do_equ:
 											if(!(i & 0x100))
 												PROCError(2062,T1);
 											i &= 0xff;
+											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											sprintf(MyBuf,"PUSH %s",T1);
+											if(OutList)
+												PROCOut1("> ",MyBuf,FALSE);
 											PROCOut(0xc5/*PUSH*/ | (Reg[i].m << 4));		//  VERIFICARE!
 #elif I8051
 											PROCOut(0xc8/*push*/,i);		//  VERIFICARE!
 #elif ST62
 											PROCOut(0xc8/*push*/,i);		//  VERIFICARE!
 #elif _6502
-											PROCOut(0x48/*PHA*/);		//  questo sempre cmq! VERIFICARE!
 											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
-											if(Reg[i].m==0)			// in teoria se poi uso PHP questo non serve, ma vabbè... (v. anche PLP
-												;
+											if(Reg[i].m==0) {			// (in teoria se poi uso PHP questo non serve, ma vabbè... (v. anche PLP
+												if(OutList)
+													PROCOut1("> ","PHA",FALSE);
+												PROCOut(0x48/*PHA*/);
+												j=1;				//  questo sempre cmq! flaggo
+												}
 											else if(Reg[i].m==1) {
+												if(!j) {
+													if(OutList)
+														PROCOut1("> ","PHA",FALSE);
+													PROCOut(0x48/*PHA*/);
+													j=1;
+													}
+												if(OutList)
+													PROCOut1("> ","TXA",FALSE);
 												PROCOut(0x8A/*TXA*/);		//  
+												if(OutList)
+													PROCOut1("> ","PHA",FALSE);
 												PROCOut(0x48/*PHA*/);
 												}
-											else if(Reg[i].m==2)
+											else if(Reg[i].m==2) {
+												if(!j) {
+													if(OutList)
+														PROCOut1("> ","PHA",FALSE);
+													PROCOut(0x48/*PHA*/);
+													j=1;
+													}
+												if(OutList)
+													PROCOut1("> ","TYA",FALSE);
 												PROCOut(0x98/*TYA*/);		//  
+												if(OutList)
+													PROCOut1("> ","PHA",FALSE);
 												PROCOut(0x48/*PHA*/);
 												}
-											else if(Reg[i].m==4)
+											else if(Reg[i].m==4) {
+												if(OutList)
+													PROCOut1("> ","PHP",FALSE);
 												PROCOut(0x02/*PHP*/);
 												}
 											else 
 												PROCError(2062,T1);
 #elif PIC==16 || PIC==18
+											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											if(OutList)
+												PROCOut1("> ","MOVWF-",FALSE);
 											PROCOut(/*MOVWF-*/,i);		//  VERIFICARE! usare MOVWF-
 #elif GD24032
-											PROCOut(/*STMDB*/,i);		//  VERIFICARE! usare STMDB
+											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											if(OutList)
+												PROCOut1("> ","STMDB",FALSE);
+											PROCOut(/*STMDB*/,i);		//  VERIFICARE! usare STMDB e SENZA loop :)
 #elif I8086
 											if(!(i & 0x100))
 												PROCError(2062,T1);
 											i &= 0xff;
 											CurProc[CurProcLevel-1]->regsSaved |= (1 << i);
+											sprintf(MyBuf,"PUSH %s",T1);
+											if(OutList)
+												PROCOut1("> ",MyBuf,FALSE);
 											if(Reg[i].m>=8 && Reg[i].m<16)
 												PROCOut(0x50/*PUSH*/ | (Reg[i].m-8));		//  
 											else if(Reg[i].m>=16 && Reg[i].m<20)
@@ -1077,8 +1097,6 @@ do_equ:
 												}
 											else 
 												PROCError(2062,T1);
-											sprintf(MyBuf,"> PUSH %s\n",T1);
-											PROCOut1(MyBuf);
 #endif
 
 											FNLA(MyBuf);
@@ -1090,9 +1108,9 @@ do_equ:
 										if(CreaHex) 
 											if(!CPass)
 												PROCWarn(1006,"Public");		// ovvio! idem ma diciamo che può rimanere, non come extrn
-										LVars->type |= VAR_PUBLIC;
-										if(!(LVars->type & VAR_PUBLIC_DEFINED)) {
-											LVars->type |= VAR_PUBLIC_DEFINED;
+										CurProc[CurProcLevel-1]->type |= VAR_PUBLIC;
+										if(!(CurProc[CurProcLevel-1]->type & VAR_PUBLIC_DEFINED)) {
+											CurProc[CurProcLevel-1]->type |= VAR_PUBLIC_DEFINED;
 											subOut(OUT_VAR_EXT,0);
 											}
 										}
@@ -1123,65 +1141,99 @@ do_equ:
 
 									if(CurProc[CurProcLevel]->localUsed>0) {
 #if Z80
-										PROCOut(0xFDE3/*ex  (sp),iy*/);
-										sprintf(MyBuf,"> EX  (SP),IY\n");
-										PROCOut1(MyBuf);
+										sprintf(MyBuf,"LD  SP,IY");
+										if(OutList)
+											PROCOut1("> ",MyBuf,FALSE);
+										PROCOut(0xFDF9/*ld  sp,iy*/);
 #elif I8051
 #elif ST62
 #elif _6502
 #elif PIC==16 || PIC==18
 #elif GD24032
-										PROCOut(/*LEAVE*/);
-										sprintf(MyBuf,"> LEAVE\n");
-										PROCOut1(MyBuf);
+										sprintf(MyBuf,"LEAVE");
+										if(OutList)
+											PROCOut1("> ",MyBuf,FALSE);
+										PROCOut(/*LEAVE R10*/);
 #elif I8086
+										sprintf(MyBuf,"LEAVE");
+										if(OutList)
+											PROCOut1("> ",MyBuf,FALSE);
 										PROCOut(0xc9/*LEAVE*/);
-										sprintf(MyBuf,"> LEAVE\n");
-										PROCOut1(MyBuf);
 #endif
 										}
-									for(i=0; i<32; i++) {			// v. anche sopra
+									j=0;
+									for(i=31; i>=0; i--) {			// v. anche sopra
 										if(CurProc[CurProcLevel]->regsSaved & (1 << i)) {
 #if Z80
+											if(OutList)
+												PROCOut1("> ","POP",FALSE);
 											PROCOut(0xc1/*POP*/ | (Reg[i].m << 4));		//  VERIFICARE!
 #elif I8051
+											if(OutList)
+												PROCOut1("> ","POP",FALSE);
 											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
 #elif ST62
+											if(OutList)
+												PROCOut1("> ","POP",FALSE);
 											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
 #elif _6502
-											if(i==0)
-												;
-											else if(Reg[i].m==1) {
+											if(i==0) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
 												PROCOut(0x68/*PLA*/);
+												j=1;
+												}
+											else if(Reg[i].m==1) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
+												PROCOut(0x68/*PLA*/);
+												if(OutList)
+													PROCOut1("> ","TAX",FALSE);
 												PROCOut(0xAA/*TAX*/);		//  
 												}
-											else if(Reg[i].m==2)
+											else if(Reg[i].m==2) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
 												PROCOut(0x68/*PLA*/);
+												if(OutList)
+													PROCOut1("> ","TAY",FALSE);
 												PROCOut(0xA8/*TAY*/);		//  
 												}
-											else if(Reg[i].m==4)
+											else if(Reg[i].m==4) {
+												if(OutList)
+													PROCOut1("> ","PLP",FALSE);
 												PROCOut(0x12/*PLP*/);		// v. nota sopra PHP
 												}
 											else 
 												PROCError(2062,T1);
-											if(i)			// questo cmq, alla fine direi!
-												PROCOut(0x68/*PLA*/);
 #elif PIC==16 || PIC==18
+											if(OutList)
+												PROCOut1("> ","MOVFW+",FALSE);
 											PROCOut(/*MOVFW*/,i);		//  VERIFICARE! usare MOVFW+
 #elif GD24032
-											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE! usare LDMIA
+											if(OutList)
+												PROCOut1("> ","LDMIA",FALSE);
+											PROCOut(0xc8/*LDMIA*/,i);		//  VERIFICARE! usare LDMIA e SENZA loop :)
 #elif I8086
+											sprintf(MyBuf,"POP %s",Reg[i].s);
+											if(OutList)
+												PROCOut1("> ",MyBuf,FALSE);
 											if(i>=8 && i<16)
 												PROCOut(0x58/*POP*/ | (i-8));		//  
 											else if(i>=16 && i<20)
 												PROCOut(0x7/*POP*/ | ((i-16) << 3));		//  
 											else if(i<28)
 												;
-											sprintf(MyBuf,"> POP %s\n","");
-											PROCOut1(MyBuf);
 #endif
 											}
 										}
+#if _6502
+									if(!j) {			// se non prima...
+										if(OutList)
+											PROCOut1("> ","PLA",FALSE);
+										PROCOut(0x68/*PLA*/);
+										}
+#endif
 
 					        CurProc[CurProcLevel]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel]->value;
 				          CurProc[CurProcLevel]=NULL;
@@ -2241,7 +2293,7 @@ nextStatement:
 		}
   if(!*TS && !parm) { 
 	  if(OutList) 
-      PROCOut1("= ",theLine);		// butto fuori righe con solo commento! alcune le scrive 2 volte... specialmente sopo SEGMENT o ENDS...
+      PROCOut1("= ",theLine);		// butto fuori righe con solo commento! alcune le scrive 2 volte... specialmente sopo SEGMENT o ENDS... e label:
     goto noStmt;
 		}
 
@@ -2271,9 +2323,8 @@ nextStatement:
     Mnn=mn-Mnem;
     if((Seg[CurSeg-1].type  & 0xff00) & (SEGMENT_DATA & 0xff00))
       PROCError(2102);
-	  if(OutList) {    
+	  if(OutList)    
 	    PROCOut1("> ",theLine,FALSE);
-	    }
     
 #if Z80  
 //		if(!CPass)
@@ -2835,10 +2886,14 @@ get2reg:
 						i &= 0xff;
 						if(Reg[i].m>=16 && Reg[i].m<=19) {
 							PROCOut(0x26 | ((i & 3) << 3), -1);
+//					if(OutList)
+//ev.							PROCOut1("> ",Reg[i].s,FALSE);
 							goto rifoIsVar;
 							}
 						else if(Reg[i].m>=40 && Reg[i].m<=41) {
 							if(CPULevel>=3) {
+//					if(OutList)
+//ev.							PROCOut1("> ",Reg[i].s,FALSE);
 								PROCOut(0x64 | (i & 1), -1);
 								goto rifoIsVar;
 								}
@@ -3391,11 +3446,15 @@ get2reg2:
 								i--;
 								i &= 0xff;
 								if(Reg[i].m>=16 && Reg[i].m<=19) {
+//					if(OutList)
+//ev.							PROCOut1("> ",Reg[i].s,FALSE);
 									PROCOut(0x26 | ((i & 3) << 3), -1);
 									goto rifoIsVar2;
 									}
 								else if(Reg[i].m>=40 && Reg[i].m<=41) {
 									if(CPULevel>=3) {
+//					if(OutList)
+//ev.							PROCOut1("> ",Reg[i].s,FALSE);
 										PROCOut(0x64 | (i & 1), -1);
 										goto rifoIsVar2;
 										}
@@ -8167,39 +8226,33 @@ do_dbs:
 //									Seg[CurSeg-1].BaseAddr=min(Seg[CurSeg-1].BaseAddr,LOWORD(l));		// mah, sì
 
   		          if(CPass) {
-  		            if(o1.l.v>o2.l.v) {
- 										o1.l.v-=o2.l.v;
-
-
-/*										if(!CreaHex && !CreaBin) {		// 2024, verificare se è ok, e se potrebbe andare anche in linker-mode (per evitare di buttare fuori 0 inutili
-  										while(o1.l.v--)
-  											PROCOut(0);
-	  		              }
-										else
-										  Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);*/
-
-// ago 24: mi pare SBAGLIATO (GD24032)! in bin non segue gli indirizzi ORG ecc... proviamo così
+  		            if(o1.l.v>o2.l.v) {	// TOGLIERE non ha più senso 2025!
 										if(CreaHex || CreaBin) {		// 
 											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
-//2025 tolto, risistemando HEX  											while(o1.l.v--)
-//  												PROCOut(0);
-												Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+												Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
 									      subOut(OUT_REPOS,o1.l.v);
 												}
 											else {
-												Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+												Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
 												}
 	  		              }
 										else {
-											Seg[CurSeg-1].CurAddr+=LOWORD(o1.l.v);
+											Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
 											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
-									      subOut(OUT_REPOS,o1.l.v);
+									      subOut(OUT_REPOS,(int32_t)(o1.l.v-o2.l.v));
 											}
   		              }
   		            else { 
     			          Seg[CurSeg-1].CurAddr=LOWORD(o1.l.v);
-										if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
-								      subOut(OUT_REPOS,(int32_t)(o1.l.v-o2.l.v));
+										if(CreaHex || CreaBin) {		// 
+											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00)) {
+									      subOut(OUT_REPOS,o1.l.v);
+												}
+	  		              }
+										else {
+											if((Seg[CurSeg-1].type & 0xff00) != (SEGMENT_VIRT & 0xff00))
+												subOut(OUT_REPOS,(int32_t)(o1.l.v-o2.l.v));
+											}
 				            }
 				          }
 				        else 
@@ -8417,7 +8470,7 @@ cseg_addr:
 									}
 								}
 							if(i)
-								PROCOut(OUT_SEGM);
+								PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 		          break;
 		        case 1:				// dseg
 		          CurSeg=DefDSeg;
@@ -8473,7 +8526,7 @@ cseg_addr:
 									}
 								}
 							if(i)
-								PROCOut(OUT_SEGM);
+								PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 		          break;
 		        case 2:				// csect
 			        FNObbLO(myBuf);
@@ -8483,7 +8536,7 @@ cseg_addr:
 								}
 							else {
 								CurSeg=PROCDclSeg(myBuf,SEGMENT_CODE);
-								PROCOut(OUT_SEGM);
+								PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 		        case 3:				// dsect
@@ -8494,7 +8547,7 @@ cseg_addr:
 								}
 							else {
 				        CurSeg=PROCDclSeg(myBuf,SEGMENT_DATA);
-								PROCOut(OUT_SEGM);
+								PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 		        case 4:				// const
@@ -8510,7 +8563,7 @@ cseg_addr:
 								}
 							else {
 				        CurSeg=PROCDclSeg(myBuf,SEGMENT_CONST);		// gestire... read-only
-			          PROCOut(OUT_SEGM);
+			          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 		        case 5:				// bss
@@ -8526,7 +8579,7 @@ cseg_addr:
 								}
 							else {
 				        CurSeg=PROCDclSeg(myBuf,SEGMENT_BSS);			// gestire... zero-init
-			          PROCOut(OUT_SEGM);
+			          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 		        case 6:				// isr/irq
@@ -8564,7 +8617,7 @@ cseg_addr:
 							if(CreaHex) {		// qua? no, fare
 								}
 							else {
-			          PROCOut(OUT_SEGM);
+			          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 		        case 7:				// Eseg
@@ -8580,7 +8633,7 @@ cseg_addr:
 								}
 							else {
 				        CurSeg=PROCDclSeg(myBuf,SEGMENT_DATA);		// gestire... read-only?!
-			          PROCOut(OUT_SEGM);
+			          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 								}
 			        break;
 						}
@@ -8634,65 +8687,99 @@ cseg_addr:
 
 									if(CurProc[CurProcLevel]->localUsed>0) {
 #if Z80
-										PROCOut(0xFDE3/*ex  (sp),iy*/);
-										sprintf(MyBuf,"> EX  (SP),IY\n");
-										PROCOut1(MyBuf);
+										sprintf(myBuf,"LD  SP,IY");
+										if(OutList)
+											PROCOut1("> ",myBuf,FALSE);
+										PROCOut(0xFDF9/*ld  sp,iy*/);
 #elif I8051
 #elif ST62
 #elif _6502
 #elif PIC==16 || PIC==18
 #elif GD24032
-										PROCOut(/*LEAVE*/);
-										sprintf(myBuf,"> LEAVE\n");
-										PROCOut1(myBuf);
+										sprintf(myBuf,"LEAVE");
+										if(OutList)
+											PROCOut1("> ",MyBuf,FALSE);
+										PROCOut(/*LEAVE R10*/);
 #elif I8086
+										sprintf(myBuf,"LEAVE");
+										if(OutList)
+											PROCOut1("> ",myBuf,FALSE);
 										PROCOut(0xc9/*LEAVE*/);
-										sprintf(myBuf,"> LEAVE\n");
-										PROCOut1(myBuf);
 #endif
 										}
-									for(i=0; i<32; i++) {
+									for(i=31; i>=0; i--) {
 										if(CurProc[CurProcLevel]->regsSaved & (1 << i)) {
 #if Z80
+											sprintf(myBuf,"POP %s","");
+											if(OutList)
+												PROCOut1("> ",myBuf,FALSE);
 											PROCOut(0xc1/*POP*/ | (Reg[i].m << 4));		//  VERIFICARE!
 #elif I8051
+											if(OutList)
+												PROCOut1("> ","POP",FALSE);
 											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
 #elif ST62
+											if(OutList)
+												PROCOut1("> ","POP",FALSE);
 											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE!
 #elif _6502
-											if(i==0)
-												;
-											else if(Reg[i].m==1) {
+											if(i==0) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
 												PROCOut(0x68/*PLA*/);
+												j=1;
+												}
+											else if(Reg[i].m==1) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
+												PROCOut(0x68/*PLA*/);
+												if(OutList)
+													PROCOut1("> ","TAX",FALSE);
 												PROCOut(0xAA/*TAX*/);		//  
 												}
-											else if(Reg[i].m==2)
+											else if(Reg[i].m==2) {
+												if(OutList)
+													PROCOut1("> ","PLA",FALSE);
 												PROCOut(0x68/*PLA*/);
+												if(OutList)
+													PROCOut1("> ","TAY",FALSE);
 												PROCOut(0xA8/*TAY*/);		//  
 												}
-											else if(Reg[i].m==4)
+											else if(Reg[i].m==4) {
+												if(OutList)
+													PROCOut1("> ","PLP",FALSE);
 												PROCOut(0x12/*PLP*/);		// v. nota sopra PHP
 												}
 											else 
 												PROCError(2062,T1);
-											if(i)			// questo cmq, alla fine direi!
-												PROCOut(0x68/*PLA*/);
 #elif PIC==16 || PIC==18
+											if(OutList)
+												PROCOut1("> ","MOVFW+",FALSE);
 											PROCOut(/*MOVFW*/,i);		//  VERIFICARE! usare MOVFW+
 #elif GD24032
-											PROCOut(0xc8/*POP*/,i);		//  VERIFICARE! usare LDMIA
+											if(OutList)
+												PROCOut1("> ","LDMIA",FALSE);
+											PROCOut(0xc8/*LDMIA*/,i);		//  VERIFICARE! usare LDMIA e SENZA loop :)
 #elif I8086
+											sprintf(myBuf,"POP %s","");
+											if(OutList)
+												PROCOut1("> ",myBuf,FALSE);
 											if(i>=8 && i<16)
 												PROCOut(0x58/*POP*/ | (i-8));		//  
 											else if(i>=16 && i<20)
 												PROCOut(0x7/*POP*/ | ((i-16) << 3));		//  
 											else if(i<28)
 												;
-											sprintf(myBuf,"> POP %s\n","");
-											PROCOut1(myBuf);
 #endif
 											}
 										}
+#if _6502
+									if(!j) {			// se non prima...
+										if(OutList)
+											PROCOut1("> ","PLA",FALSE);
+										PROCOut(0x68/*PLA*/);
+										}
+#endif
 
 									CurProc[CurProcLevel]->dim=Seg[CurSeg-1].CurAddr-CurProc[CurProcLevel]->value;
 									CurProc[CurProcLevel]=NULL;
@@ -8854,7 +8941,7 @@ cseg_addr:
 							CurSeg=PROCDclSeg(myBuf,SEGMENT_CONFIG);		// 
 							Seg[CurSeg-1].CurAddr=0;
 							Seg[CurSeg-1].MaxAddr=0;
-		          PROCOut(OUT_SEGM);
+		          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 		          PROCDclVar(myBuf,o1.l,VAR_NUMBER,0/*,myBuf*/);
 		          PROCOut1("! ");
 							PROCOut(LOBYTE(o1.l.v),HIBYTE(o1.l.v),-1,i);
@@ -8867,7 +8954,7 @@ cseg_addr:
 							CurSeg=PROCDclSeg(myBuf,SEGMENT_IDLOCS);		// 
 							Seg[CurSeg-1].CurAddr=0;
 							Seg[CurSeg-1].MaxAddr=0;
-		          PROCOut(OUT_SEGM);
+		          PROCOut(OUT_SEGM,Seg[CurSeg-1].CurAddr);
 		          PROCDclVar(myBuf,o1.l,VAR_NUMBER,0/*,myBuf*/);
 		          PROCOut1("! ");
 							PROCOut(LOBYTE(o1.l.v),HIBYTE(o1.l.v),-1,i);
@@ -9030,21 +9117,26 @@ cseg_addr:
 									} while(*TS);
 #if Z80
 								l.v=(CurProc[CurProcLevel-1]->localUsed +1) & 0xfffe;		// word aligned
-								PROCOut(0xFD21/*ld  iy,nn*/,-LOBYTE(l.v),-HIBYTE(l.v));
-								sprintf(myBuf,"> LD IY,%u\n",-l.v);
-								PROCOut1(myBuf);
+								sprintf(myBuf,"LD IY,%d",-l.v);
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
+								PROCOut(0xFD21/*ld  iy,nn*/,LOBYTE(-l.v),HIBYTE(-l.v));
+								sprintf(myBuf,"ADD IY,SP");
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
 								PROCOut(0xFD39/*add iy,sp*/);
-								sprintf(myBuf,"> ADD IY,SP\n");
-								PROCOut1(myBuf);
+								sprintf(myBuf,"LD SP,IY");
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
 								PROCOut(0xFDF9/*ld  sp,iy*/);		// (IY punta allo stack frame, v. casanet/videoteca/prova4
-								sprintf(myBuf,"> LD SP,IY\n");
-								PROCOut1(myBuf);
+								sprintf(myBuf,"LD IY,%u",l.v);
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
 								PROCOut(0xFD21/*ld  iy,nn*/,LOBYTE(l.v),HIBYTE(l.v));
-								sprintf(myBuf,"> LD IY,%u\n",l.v);
-								PROCOut1(myBuf);
+								sprintf(myBuf,"ADD IY,SP");
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
 								PROCOut(0xFD39/*add iy,sp*/);
-								sprintf(myBuf,"> ADD IY,SP\n");
-								PROCOut1(myBuf);
 #elif I8051
 								PROCError(1007,"LOCAL (serve stack software?)");
 #elif ST62
@@ -9054,8 +9146,7 @@ cseg_addr:
 #elif PIC==16 || PIC==18
 								PROCError(1007,"LOCAL (serve stack software)");
 #elif GD24032
-								PROCOut(/*ENTER*/,LOBYTE(l.v),HIBYTE(l.v));
-								PROCOut(/*nested...*/);
+								PROCOut(/*ENTER R10,16*/,LOBYTE(l.v),HIBYTE(l.v));
 								sprintf(myBuf,"> ENTER %u\n",l.v);
 								PROCOut1(myBuf);
 #elif I8086
@@ -9063,10 +9154,11 @@ cseg_addr:
 									l.v=(CurProc[CurProcLevel-1]->localUsed +1) & 0xfffe;		// word aligned
 								else
 									l.v=(CurProc[CurProcLevel-1]->localUsed +3) & 0xfffc;		// dword aligned
+								sprintf(myBuf,"ENTER %u",l.v);
+								if(OutList)
+									PROCOut1("> ",myBuf,FALSE);
 								PROCOut(0xc8/*ENTER*/,LOBYTE(l.v),HIBYTE(l.v));
-								PROCOut(0/*nested...*/);
-								sprintf(myBuf,"> ENTER %u\n",l.v);
-								PROCOut1(myBuf);
+								PROCOut(CurProcLevel-1 /*è un'idea! nested...*/);
 #endif
 								}
 							else 
@@ -10200,8 +10292,11 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize,uint32_t *saddress) {
 						j=asc2hex(*(uint16_t *)p);
 						minAddr=min(minAddr,(uint8_t *)b-(uint8_t *)theMemory);
 						maxAddr=max(maxAddr,(uint8_t *)b-(uint8_t *)theMemory);
-						if(*b != 0xff)		// ma non esce... sistemare! credo sia l'HEX che esce già così, in sequenza brutale...
-							PROCWarn(2104);
+						if(*b != 0xff) {
+							char myBuf2[64];
+							sprintf(myBuf2,"%04X: %02X",(uint8_t *)b-(uint8_t *)theMemory,*b);
+							PROCWarn(2104,myBuf2);
+							}
 						*b++=j;
 						cks+=j;
 						checksum+=j;
@@ -10209,13 +10304,13 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize,uint32_t *saddress) {
 						}
 					}
 				else {			
-					PROCWarn(1007,"EXTOFS in HEX!");
+					PROCWarn(1007,"record EXTOFS in HEX!");
 					b=((uint8_t *)theMemory)+ofs+extOfs;
 					for(i=0; i<len; i++) {
 						j=asc2hex(*(uint16_t *)p);
 						minAddr=min(minAddr,(uint8_t *)b-(uint8_t *)theMemory);
 						maxAddr=max(maxAddr,(uint8_t *)b-(uint8_t *)theMemory);
-						if(*b != 0xff)		// ma non esce... sistemare! credo sia l'HEX che esce già così, in sequenza brutale...
+						if(*b != 0xff)
 							PROCWarn(2104);
 						*b++=j;
 						cks+=j;
@@ -10226,7 +10321,7 @@ uint8_t  *convertHEX2BIN(FILE *f,uint32_t *bsize,uint32_t *saddress) {
 				break;
 			case 0x03:
 			case 0x05:
-			 fprintf(stderr, "Ignoring start address record\n");
+				PROCWarn(1007,"Ignoring start address record");
 				continue;
 			case 1:
 				goto fine;
